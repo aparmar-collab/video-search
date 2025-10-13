@@ -56,4 +56,24 @@ export const askQuestion = async (question) => {
   }
 };
 
+export const listAllVideos = async () => {
+  try {
+    const response = await api.get('/videos/list');
+    return response.data;
+  } catch (error) {
+    console.error('Error listing videos:', error);
+    throw error;
+  }
+};
+
+export const getVideoDetails = async (videoId) => {
+  try {
+    const response = await api.get(`/videos/${videoId}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error getting video details:', error);
+    throw error;
+  }
+};
+
 export default api;

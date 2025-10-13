@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
@@ -11,6 +11,7 @@ from clients import (
     TwelveLabsClient,
     OpenSearchClient
 )
+from video_routes import router as video_router
 
 app = FastAPI(title="Video Search API")
 
@@ -28,6 +29,9 @@ bedrock_client = BedrockClient()
 twelvelabs_client = BedrockTwelveLabsClient() if os.getenv('Bedrock_TL') == "True" else TwelveLabsClient() 
 opensearch_client = OpenSearchClient()
 video_agent = VideoSearchAgent()
+
+# Include video routes (will use the opensearch_client directly)
+app.include_router(video_router)
 
 # Models
 class SearchRequest(BaseModel):

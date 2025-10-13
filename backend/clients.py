@@ -482,4 +482,112 @@ class OpenSearchClient:
             results.append(result)
         
         return results
+    
+    def get_all_unique_videos(self) -> List[Dict]:
+        """Get all unique videos based on video_path with aggregated metadata"""
+        try:
+            # Use aggregations to get unique videos based on video_path
+            search_body = {
+                "size": 0,
+                "aggs": {
+                    "unique_videos": {
+                        "terms": {
+                            "field": "video_path",  # Group by video_path instead of video_id
+                            "size": 1000  # Adjust based on expected number of videos
+                        },
+                        "aggs": {
+                            "video_info": {
+                                "top_hits": {
+                                    "size": 1,
+                                    "_source": ["video_id", "video_path", "timestamp_start", "timestamp_end"]
+                                }
+                            },
+                            "total_clips": {
+                                "value_count": {
+                                    "field": "video_path"
+                                }
+                            },
+                            "max_timestamp": {
+                                "max": {
+                                    "field": "timestamp_end"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            response = self.client.search(
+                index="video_clips",
+                body=search_body
+            )
+            
+            videos = []
+            for bucket in response['aggregations']['unique_videos']['buckets']:
+                video_info = bucket['video_info']['hits']['hits'][0]['_source']
+                max_duration = bucket['max_timestamp']['value']
+                video_path = bucket['key']
+                
+                # Extract a readable name from the video path
+                video_name = video_path.split('/')[-1].split('?')[0]  # Get filename from S3 URL
+                
+                videos.append({
+                    'video_id': video_info['video_id'],
+                    'video_path': video_path,
+                    'clips_count': bucket['doc_count'],
+                    'title': video_name or f"Video {video_info['video_id'][:8]}",
+                    'thumbnail_url': video_path,  # Use video URL for thumbnail generation
+                    'duration': max_duration if max_duration else None,
+                    'upload_date': None
+                })
+            
+            return videos
+        
+        except Exception as e:
+            print(f"Error getting unique videos: {e}")
+            return []
+    
+    def get_video_by_id(self, video_id: str) -> Dict:
+        """Get video details by video_id"""
+        try:
+            search_body = {
+                "size": 1,
+                "query": {
+                    "term": {
+                        "video_id": video_id
+                    }
+                },
+                "aggs": {
+                    "clips_count": {
+                        "value_count": {
+                            "field": "video_id"
+                        }
+                    }
+                }
+            }
+            
+            response = self.client.search(
+                index="video_clips",
+                body=search_body
+            )
+            
+            if response['hits']['total']['value'] == 0:
+                return None
+            
+            video_info = response['hits']['hits'][0]['_source']
+            clips_count = response['aggregations']['clips_count']['value']
+            
+            return {
+                'video_id': video_info['video_id'],
+                'video_path': video_info['video_path'],
+                'clips_count': clips_count,
+                'title': f"Video {video_id[:8]}",
+                'thumbnail_url': None,
+                'duration': None,
+                'upload_date': None
+            }
+        
+        except Exception as e:
+            print(f"Error getting video by ID: {e}")
+            return None
 

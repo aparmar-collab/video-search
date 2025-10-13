@@ -18,21 +18,21 @@ const VideoClipCard = ({ clip, onClick }) => {
 
   return (
     <div 
-      className="clip-card group"
+      className="bg-white rounded-3xl shadow-md hover:shadow-xl hover:border-blue-200 border border-transparent transition-all duration-300 overflow-hidden cursor-pointer group"
       onClick={() => onClick(clip)}
     >
       {/* Video Thumbnail */}
-      <div className="relative h-48 bg-gray-900 flex items-center justify-center overflow-hidden">
+      <div className="relative h-52 bg-gray-200 flex items-center justify-center overflow-hidden">
         {/* Loading state */}
         {thumbnailLoading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-gray-800">
-            <Loader2 size={40} className="text-white animate-spin" />
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-200">
+            <Loader2 size={40} className="text-gray-400 animate-spin" />
           </div>
         )}
         
         {/* Error state */}
         {thumbnailError && !thumbnail && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-800 text-white p-4">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-200 text-gray-600 p-4">
             <div className="text-red-400 text-sm text-center mb-2">
               Unable to load thumbnail
             </div>
@@ -52,47 +52,17 @@ const VideoClipCard = ({ clip, onClick }) => {
           />
         )}
         
-        <div className="absolute inset-0 bg-black/20 group-hover:bg-black/10 transition-all duration-300" />
-        
-        {/* Play button overlay */}
-        <div className="relative z-10 w-16 h-16 bg-white/90 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform duration-300 shadow-lg">
-          <Play size={28} className="text-primary-600 ml-1" fill="currentColor" />
-        </div>
-        
-        {/* Confidence badge */}
-        <div className={`absolute top-3 left-3 px-3 py-1 rounded-full text-xs font-semibold ${confidence_color}`}>
-          {confidence_level}
-        </div>
-        
         {/* Timestamp overlay */}
-        <div className="absolute bottom-3 right-3 px-3 py-1 bg-black/70 text-white text-sm rounded-lg font-medium backdrop-blur-sm">
-          {formatTimestamp(timestamp_start)} - {formatTimestamp(timestamp_end)}
+        <div className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
+          {formatTimestamp(timestamp_start)}
         </div>
       </div>
       
       {/* Card content */}
-      <div className="p-5">
-        <div className="flex items-start justify-between gap-3 mb-3">
-          <div className="flex items-center gap-2 text-gray-500 text-sm">
-            <Clock size={16} />
-            <span>Duration: {Math.round(timestamp_end - timestamp_start)}s</span>
-          </div>
-          
-          <div className="flex items-center gap-1 text-primary-600 text-sm font-medium">
-            <TrendingUp size={16} />
-            <span>{(score * 100).toFixed(1)}%</span>
-          </div>
-        </div>
-        
-        <p className="text-gray-600 text-sm line-clamp-2">
+      <div className="p-4">
+        <p className="text-md font-semibold truncate text-gray-900">
           {clip_text || 'Video clip segment'}
         </p>
-        
-        <div className="mt-3 pt-3 border-t border-gray-100">
-          <p className="text-xs text-gray-400 truncate">
-            Video ID: {video_id}
-          </p>
-        </div>
       </div>
     </div>
   );

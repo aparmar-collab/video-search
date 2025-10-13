@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Upload, CheckCircle, XCircle, Loader2, Video, AlertCircle, FileVideo } from 'lucide-react';
+import { Upload, CheckCircle, XCircle, Loader2, Video, AlertCircle, FileVideo, UploadCloud } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { upload_to_s3, validate_video_file } from '../utils/s3Upload';
 import { processVideo, getVideoStatus } from '../services/api';
 
@@ -111,20 +112,23 @@ const VideoUpload = () => {
   };
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <motion.section
+      initial={{ opacity: 0, y: 50 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -50 }}
+      transition={{ duration: 0.7 }}
+      className="w-full h-full flex flex-col items-center justify-center px-4"
+    >
       {/* Header */}
       <div className="text-center mb-8">
-        <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-primary-600 to-primary-400 rounded-2xl mb-4 shadow-lg">
-          <Video size={32} className="text-white" />
-        </div>
-        <h2 className="text-3xl font-bold text-gray-900 mb-2">Upload Video</h2>
-        <p className="text-gray-600">
-          Upload your video to S3 and process it for AI-powered search
+        <h2 className="text-5xl font-extrabold mb-4 bg-gradient-to-r from-blue-600 to-blue-400 bg-clip-text text-transparent">Share Your Story</h2>
+        <p className="text-blue-600 mb-8 max-w-xl text-center">
+          Upload your best moments and let others discover your creativity. Smooth, fast, and secure.
         </p>
       </div>
 
       {/* Upload Card */}
-      <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-8">
+      <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 w-full max-w-3xl">
         {uploadStatus === 'idle' || uploadStatus === 'error' ? (
           <>
             {/* File Input */}
@@ -133,12 +137,12 @@ const VideoUpload = () => {
                 htmlFor="video-upload"
                 className="block w-full cursor-pointer"
               >
-                <div className="border-2 border-dashed border-gray-300 rounded-xl p-12 text-center hover:border-primary-500 hover:bg-primary-50 transition-all duration-200">
-                  <FileVideo size={48} className="mx-auto text-gray-400 mb-4" />
-                  <p className="text-lg font-medium text-gray-700 mb-2">
+                <div className="border-2 border-dashed border-blue-300 rounded-xl p-16 text-center hover:border-blue-500 hover:bg-blue-50 transition-all duration-200 min-h-[300px] flex flex-col items-center justify-center">
+                  <FileVideo size={64} className="mx-auto text-blue-400 mb-6" />
+                  <p className="text-xl font-semibold text-gray-700 mb-3">
                     {file ? file.name : 'Click to select video'}
                   </p>
-                  <p className="text-sm text-gray-500">
+                  <p className="text-base text-gray-500">
                     MP4, WebM, OGG, or MOV (max 500MB)
                   </p>
                 </div>
@@ -182,9 +186,9 @@ const VideoUpload = () => {
             <button
               onClick={handle_upload}
               disabled={!file}
-              className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full flex items-center justify-center gap-3 px-8 py-5 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl font-semibold text-lg shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
             >
-              <Upload size={20} />
+              <Upload size={24} />
               Upload & Process Video
             </button>
           </>
@@ -287,21 +291,7 @@ const VideoUpload = () => {
           </>
         )}
       </div>
-
-      {/* Info Section */}
-      <div className="mt-8 p-6 bg-blue-50 border border-blue-200 rounded-xl">
-        <h4 className="font-semibold text-blue-900 mb-2 flex items-center gap-2">
-          <AlertCircle size={20} />
-          How it works
-        </h4>
-        <ol className="list-decimal list-inside space-y-2 text-sm text-blue-800">
-          <li>Video is uploaded to AWS S3 bucket</li>
-          <li>TwelveLabs generates embeddings for video segments</li>
-          <li>Embeddings are indexed in OpenSearch</li>
-          <li>Video becomes searchable using natural language</li>
-        </ol>
-      </div>
-    </div>
+    </motion.section>
   );
 };
 

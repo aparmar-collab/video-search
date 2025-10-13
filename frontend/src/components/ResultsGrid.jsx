@@ -17,26 +17,9 @@ const ResultsGrid = ({ clips, total, query, onClipClick }) => {
   }
 
   return (
-    <div className="animate-fade-in">
-      {/* Results header */}
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">Search Results</h2>
-          <p className="text-gray-600 mt-1">
-            Found <span className="font-semibold text-primary-600">{total}</span> matching clips
-            {query && <span className="text-gray-400"> for "{query}"</span>}
-          </p>
-        </div>
-        
-        <div className="flex items-center gap-2 text-sm text-gray-500">
-          <button className="btn-secondary">
-            View By Clips
-          </button>
-        </div>
-      </div>
-
+    <div className="w-full">
       {/* Results grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
         {clips.map((clip, index) => (
           <VideoClipCard
             key={`${clip.video_id}-${clip.timestamp_start}-${index}`}
