@@ -119,7 +119,7 @@ export const get_or_generate_thumbnail = async (videoUrl, videoId, timestamp) =>
   
   // Check sessionStorage cache
   try {
-    const cached = sessionStorage.getItem(cacheKey);
+    const cached = localStorage.getItem(cacheKey);
     if (cached) {
       return cached;
     }

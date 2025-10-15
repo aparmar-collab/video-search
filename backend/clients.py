@@ -748,11 +748,10 @@ class BedrockOpensearchClient:
             "video_path": video_path,
             "timestamp_start": timestamp_start,
             "timestamp_end": timestamp_end,
-            "clip_text": clip_text,
+            "clip_text": video_path.split("/")[-1],
             "embedding_scope": embedding_scope,
             "embedding": embedding
         }
-        
         response = self.client.index(
             index="video_clips",
             body=doc
@@ -868,7 +867,7 @@ class BedrockOpensearchClient:
                                 "match": {
                                     "clip_text": {
                                         "query": query_text,
-                                        "boost": 1.0
+                                        "fuzziness": "AUTO"
                                     }
                                 }
                             }

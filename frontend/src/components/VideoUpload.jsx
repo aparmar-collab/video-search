@@ -123,7 +123,7 @@ const VideoUpload = () => {
       <div className="text-center mb-8">
         <h2 className="text-5xl font-extrabold mb-4 bg-gradient-to-r from-blue-600 to-blue-400 bg-clip-text text-transparent">Share Your Story</h2>
         <p className="text-blue-600 mb-8 max-w-xl text-center">
-          Upload your best moments and let others discover your creativity. Smooth, fast, and secure.
+          Upload your best moments. Smooth, fast, and secure.
         </p>
       </div>
 
