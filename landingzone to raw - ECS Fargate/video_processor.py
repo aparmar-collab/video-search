@@ -9,6 +9,7 @@ from datetime import datetime
 class VideoProcessor:
     def __init__(self):
         self.s3_client = boto3.client("s3")
+        self.sfn_client = boto3.client("stepfunctions")
         self.MAX_SIZE_GB = 2.0
         self.MAX_DURATION_MINUTES = 120
         self.FFPROBE_PATH = "ffprobe"
@@ -52,16 +53,77 @@ class VideoProcessor:
             duration_exceeds = duration_minutes > self.MAX_DURATION_MINUTES
 
             if not size_exceeds and not duration_exceeds:
-                print("\n✅ NO SPLITTING NEEDED")
+                print("\n✅ NO SPLITTING NEEDED. Copying to destination...")
+
+                # Construct destination key with date partitioning
+                now = datetime.now()
+                year = now.strftime("%Y")
+                month = now.strftime("%m")
+                day = now.strftime("%d")
+
+                destination_key = (
+                    f"year={year}/month={month}/day={day}/{os.path.basename(key)}"
+                )
+
+                print(
+                    f"Copying s3://{bucket}/{key} to s3://{dst_bucket}/{destination_key}"
+                )
+
+                # Perform S3 to S3 copy
+                copy_source = {"Bucket": bucket, "Key": key}
+                self.s3_client.copy_object(
+                    CopySource=copy_source, Bucket=dst_bucket, Key=destination_key
+                )
+
+                print("✓ Copy complete")
+
                 self.cleanup_tmp()
 
-                return {
+                # Create a single "part" that represents the whole video
+                final_parts = [
+                    {
+                        "part": 1,
+                        "bucket": dst_bucket,
+                        "key": destination_key,
+                        "s3_url": f"s3://{dst_bucket}/{destination_key}",
+                        "size_mb": round(size_mb, 2),
+                        "duration_seconds": round(duration_seconds, 2),
+                        "duration_minutes": round(duration_minutes, 2),
+                        "start_time": 0,
+                        "end_time": round(duration_seconds, 2),
+                    }
+                ]
+
+                final_result = {
                     "splitting_needed": False,
-                    "size_gb": round(size_gb, 2),
-                    "duration_minutes": round(duration_minutes, 2),
-                    "bucket": bucket,
-                    "key": key,
+                    "original": {
+                        "bucket": bucket,
+                        "key": key,
+                        "size_gb": round(size_gb, 2),
+                        "duration_minutes": round(duration_minutes, 2),
+                    },
+                    "parts": final_parts,
+                    "total_parts": 1,
                 }
+
+                self.s3_client.put_object(
+                    Bucket=dst_bucket,
+                    Key=f"temp/{key}.json",
+                    Body=json.dumps(final_result),
+                    ContentType="application/json",
+                )
+
+                # Send success callback to Step Functions
+                task_token = os.environ.get("TASK_TOKEN")
+                print(f"Task token to send back to step function: {task_token}")
+
+                if task_token:
+                    self.sfn_client.send_task_success(
+                        taskToken=task_token, output=json.dumps(final_result)
+                    )
+                    print("✓ Sent callback to Step Functions")
+
+                return final_result
 
             # Step 5: Plan segments
             print("\n" + "=" * 60)
@@ -94,7 +156,7 @@ class VideoProcessor:
 
             print("\n✅ COMPLETE")
 
-            return {
+            final_result = {
                 "splitting_needed": True,
                 "reason": "size" if size_exceeds else "duration",
                 "original": {
@@ -106,6 +168,24 @@ class VideoProcessor:
                 "parts": final_parts,
                 "total_parts": len(final_parts),
             }
+
+            self.s3_client.put_object(
+                Bucket=dst_bucket,
+                Key=f"temp/{key}.json",
+                Body=json.dumps(final_result),
+                ContentType="application/json",
+            )
+
+            # Send success callback to Step Functions
+            task_token = os.environ.get("TASK_TOKEN")
+            print(f"Task token to send back to step function: {task_token}")
+            if task_token:
+                self.sfn_client.send_task_success(
+                    taskToken=task_token, output=json.dumps(final_result)
+                )
+                print("✓ Sent callback to Step Functions")
+
+            return final_result
 
         except Exception as e:
             print(f"❌ Error: {str(e)}")
