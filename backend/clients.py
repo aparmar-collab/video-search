@@ -859,7 +859,7 @@ class BedrockOpensearchClient:
                                 "knn": {
                                     "embedding": {
                                         "vector": query_embedding,
-                                        "k": top_k * 2
+                                        "k": top_k # top_k * 2 # based on the lambda function exp.
                                     }
                                 }
                             },

@@ -27,7 +27,7 @@ const api = axios.create({
 // New searchClips using API Gateway endpoint
 export const searchClips = async (query, topK = 10) => {
   try {
-    const response = await fetch(`${API_GATEWAY_URL}`, {
+    const response = await fetch(`${API_GATEWAY_URL}/search`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -49,12 +49,11 @@ export const searchClips = async (query, topK = 10) => {
     console.log('API Response:', data);
     
     // Parse Lambda response format: { statusCode, body: "...json.dumps..." }
-    if (data.statusCode === 200) {
+    if (data) {
       // Parse the body string which contains JSON from python json.dumps
-      const parsedBody = JSON.parse(data.body);
-      return parsedBody;
+      return data
     } else {
-      throw new Error(`API returned status code: ${data.statusCode}`);
+      throw new Error(`API returned error`);
     }
   } catch (error) {
     console.error('Error searching clips:', error);
@@ -98,8 +97,15 @@ export const askQuestion = async (question) => {
 
 export const listAllVideos = async () => {
   try {
-    const response = await api.get('/videos/list');
-    return response.data;
+    const response = await fetch(`${API_GATEWAY_URL}/list`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      }
+    });
+    let data = await response.json();
+    console.log(data)
+    return data;
   } catch (error) {
     console.error('Error listing videos:', error);
     throw error;

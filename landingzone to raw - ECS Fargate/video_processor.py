@@ -62,7 +62,7 @@ class VideoProcessor:
                 day = now.strftime("%d")
 
                 destination_key = (
-                    f"year={year}/month={month}/day={day}/{os.path.basename(key)}"
+                    f"year={year}/month={month}/day={day}/{os.path.basename(key.replace(' ', '-'))}"
                 )
 
                 print(
@@ -105,13 +105,6 @@ class VideoProcessor:
                     "parts": final_parts,
                     "total_parts": 1,
                 }
-
-                self.s3_client.put_object(
-                    Bucket=dst_bucket,
-                    Key=f"temp/{key}.json",
-                    Body=json.dumps(final_result),
-                    ContentType="application/json",
-                )
 
                 # Send success callback to Step Functions
                 task_token = os.environ.get("TASK_TOKEN")
@@ -168,13 +161,6 @@ class VideoProcessor:
                 "parts": final_parts,
                 "total_parts": len(final_parts),
             }
-
-            self.s3_client.put_object(
-                Bucket=dst_bucket,
-                Key=f"temp/{key}.json",
-                Body=json.dumps(final_result),
-                ContentType="application/json",
-            )
 
             # Send success callback to Step Functions
             task_token = os.environ.get("TASK_TOKEN")
@@ -276,6 +262,8 @@ class VideoProcessor:
         """Split and upload segments"""
         base_name = os.path.splitext(original_key)[0]
         extension = os.path.splitext(original_key)[1]
+
+        base_name = base_name.replace(" ", "-")
 
         final_parts = []
 
