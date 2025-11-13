@@ -4,7 +4,7 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 const API_GATEWAY_URL = import.meta.env.VITE_API_GATEWAY_URL
 const BACKEND_ALB_URL = import.meta.env.VITE_BACKEND_ALB_URL
 
-const BACKEND_URL = BACKEND_ALB_URL
+const BACKEND_URL = API_BASE_URL
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -37,7 +37,7 @@ export const searchClips = async (query, topK = 10, searchType = 'vector') => {
       },
       body: JSON.stringify({
         query_text: query,
-        top_k: 10,
+        top_k: topK,
         search_type: searchType
       }),
     });

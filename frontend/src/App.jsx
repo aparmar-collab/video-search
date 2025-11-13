@@ -19,15 +19,15 @@ function App() {
   const [selectedClip, setSelectedClip] = useState(null);
   const [hasSearched, setHasSearched] = useState(false); // Track if user has searched
 
-  const handle_search = async (searchQuery, searchType) => {
+  const handle_search = async (searchQuery, searchType, topK = 20) => {
     setIsLoading(true);
     setError(null);
     setQuery(searchQuery);
     setHasSearched(true); // Mark that a search has been performed
 
     try {
-      console.log("Sending req. to API with", searchQuery, searchType)
-      const response = await searchClips(searchQuery, 10, searchType);
+      console.log("Sending req. to API with", searchQuery, searchType, topK)
+      const response = await searchClips(searchQuery, topK, searchType);
       setClips(response.clips);
       setTotal(response.total);
     } catch (err) {
@@ -154,7 +154,7 @@ function App() {
 
                 {/* Results */}
                 {!isLoading && clips.length > 0 && (
-                  <div className="w-full max-w-6xl mx-auto">
+                  <div className="w-full max-w-7xl mx-auto">
                     <ResultsGrid
                       clips={clips}
                       total={total}

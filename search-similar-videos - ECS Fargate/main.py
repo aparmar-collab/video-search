@@ -17,11 +17,6 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Video Search Service", version="1.0.0")
 
-
-# CHANGE 1: Updated index name to consolidated index
-INDEX_NAME = "video_clips_consolidated"
-VECTOR_PIPELINE = "vector-norm-pipeline-consolidated-index-rrf"
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://condenast-fe.s3-website-us-east-1.amazonaws.com"],
@@ -29,6 +24,40 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# CHANGE 1: Updated index name to consolidated index
+INDEX_NAME = "video_clips_consolidated"
+VECTOR_PIPELINE = "vector-norm-pipeline-consolidated-index-rrf"
+MIN_SCORE = 0.55
+INNER_TOP_K = 50
+
+# Initialize clients at startup
+opensearch_client = None
+bedrock_runtime = None
+s3_client = None
+vector_pipeline_exists = False
+hybrid_pipeline_exists = False
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize clients and pipelines on application startup"""
+    global opensearch_client, bedrock_runtime, s3_client, vector_pipeline_exists, hybrid_pipeline_exists
+    
+    try:
+        logger.info("Initializing clients...")
+        opensearch_client = get_opensearch_client()
+        bedrock_runtime = boto3.client('bedrock-runtime', region_name='us-east-1')
+        s3_client = boto3.client('s3', region_name='us-east-1')
+        
+        logger.info("Initializing search pipelines...")
+        hybrid_pipeline_exists = _create_hybrid_search_pipeline(opensearch_client)
+        vector_pipeline_exists = _create_vector_search_pipeline(opensearch_client)
+        
+        logger.info("✓ All clients and pipelines initialized successfully")
+    except Exception as e:
+        logger.error(f"✗ Startup initialization failed: {e}", exc_info=True)
+        raise
 
 
 class SearchRequest(BaseModel):
@@ -82,11 +111,6 @@ async def search_videos(request: SearchRequest):
         
         logger.info(f"Searching for: '{query_text}' (type: {search_type}, top_k: {top_k})")
         
-        # Initialize clients
-        opensearch_client = get_opensearch_client()
-        bedrock_runtime = boto3.client('bedrock-runtime', region_name='us-east-1')
-        s3_client = boto3.client('s3', region_name='us-east-1')
-        
         # Generate query embedding using Bedrock Marengo
         query_embedding = generate_text_embedding(bedrock_runtime, query_text)
         
@@ -135,9 +159,6 @@ async def list_all_videos():
     Returns video metadata including S3 paths and clip counts
     """
     try:
-        opensearch_client = get_opensearch_client()
-        s3_client = boto3.client('s3', region_name='us-east-1')
-        
         # Get all unique videos from OpenSearch
         videos = get_all_unique_videos(opensearch_client)
         
@@ -372,8 +393,8 @@ def hybrid_search(client, query_embedding: List[float], query_text: str, top_k: 
         "_source": ["video_id", "video_path", "clip_id", "timestamp_start", 
                    "timestamp_end", "clip_text", "thumbnail_path", "video_name", "clip_duration"]
     }
-    pipeline_exists = _create_hybrid_search_pipeline(client)
-    if pipeline_exists:
+
+    if hybrid_pipeline_exists:
         search_params = {
                 "index": INDEX_NAME,
                 "body": search_body,
@@ -408,7 +429,7 @@ def vector_search(client, query_embedding: List[float], top_k: int = 10) -> List
                             "emb_vis_text": 
                             {
                                 "vector": query_embedding, 
-                                "k": top_k
+                                "k": INNER_TOP_K
                             }
                         }
                     },
@@ -417,7 +438,7 @@ def vector_search(client, query_embedding: List[float], top_k: int = 10) -> List
                             "emb_audio": 
                             {
                                 "vector": query_embedding, 
-                                "k": top_k
+                                "k": INNER_TOP_K
                             }
                         }
                     }
@@ -427,8 +448,8 @@ def vector_search(client, query_embedding: List[float], top_k: int = 10) -> List
         "_source": ["video_id", "video_path", "clip_id", "timestamp_start",
                     "timestamp_end", "clip_text", "thumbnail_path", "video_name", "clip_duration"]
     }
-    pipeline_exists = _create_vector_search_pipeline(client)
-    if pipeline_exists:
+
+    if vector_pipeline_exists:
         search_params = {
                 "index": INDEX_NAME,
                 "body": search_body,
@@ -472,7 +493,7 @@ def visual_search(client, query_embedding: List[float], top_k: int = 10) -> List
             "knn": {
                 "emb_vis_text": {
                     "vector": query_embedding,
-                    "min_score": 0.6
+                    "min_score": 0.5
                 }
             }
         },
@@ -492,7 +513,7 @@ def audio_search(client, query_embedding: List[float], top_k: int = 10) -> List[
             "knn": {
                 "emb_audio": {
                     "vector": query_embedding,
-                    "min_score": 0.6
+                    "min_score": 0.5
                 }
             }
         },
@@ -527,16 +548,12 @@ def _create_hybrid_search_pipeline(client):
     }
     
     try:
-        try:
-            client.search_pipeline.get(id="hybrid-norm-pipeline-consolidated-index")
-            logger.info("Hybrid search pipeline already exists")
-        except:
-            client.search_pipeline.put(
+        client.search_pipeline.put(
                 id="hybrid-norm-pipeline-consolidated-index",
                 body=pipeline_body
             )
-            logger.info("✓ Created hybrid search pipeline with min-max normalization")
-    
+        logger.info("✓ Created hybrid search pipeline with min-max normalization")
+            
     except Exception as e:
         logger.warning(f"✗ Pipeline creation error: {e}")
         return False
@@ -565,14 +582,26 @@ def _create_vector_search_pipeline(client):
     #         }
     #     ]
     # }
+    # pipeline_body = {
+    #     "description": "Post processor for hybrid RRF search",
+    #     "phase_results_processors": [
+    #         {
+    #             "score-ranker-processor": {
+    #                 "combination": {
+    #                     "technique": "rrf",
+    #                     "rank_constant": 60
+    #                 }
+    #             }
+    #         }
+    #     ]
+    # }
     pipeline_body = {
-        "description": "Post processor for hybrid RRF search",
+        "description": "Post-processing pipeline for vector search with min-max normalization (0-1 range)",
         "phase_results_processors": [
             {
-                "score-ranker-processor": {
-                    "combination": {
-                        "technique": "rrf",
-                        "rank_constant": 1
+                "normalization-processor": {
+                    "normalization": {
+                        "technique": "z_score"
                     }
                 }
             }
@@ -580,16 +609,12 @@ def _create_vector_search_pipeline(client):
     }
     
     try:
-        try:
-            client.search_pipeline.get(id=VECTOR_PIPELINE)
-            logger.info("✓ Vector search pipeline already exists")
-        except:
-            client.search_pipeline.put(
+        client.search_pipeline.put(
                 id=VECTOR_PIPELINE,
                 body=pipeline_body
             )
-            logger.info("✓ Created vector search pipeline with min-max normalization")
-    
+        logger.info("✓ Created vector search pipeline with normalization")
+
     except Exception as e:
         logger.warning(f"✗ Vector pipeline creation error: {e}")
         return False

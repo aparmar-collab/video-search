@@ -16,10 +16,10 @@ const VideoClipCard = ({ clip, onClick }) => {
   let confidenceLabel = 'LOW';
   let indicatorBg = 'bg-red-500';
 
-  if (evaluationScore >= 40 && evaluationScore < 70) {
+  if (evaluationScore >= 60 && evaluationScore < 75) {
     confidenceLabel = 'MEDIUM';
     indicatorBg = 'bg-yellow-500';
-  } else if (evaluationScore >= 70) {
+  } else if (evaluationScore >= 75) {
     confidenceLabel = 'HIGH';
     indicatorBg = 'bg-green-500';
   }
@@ -70,13 +70,17 @@ const VideoClipCard = ({ clip, onClick }) => {
 
   return (
     <div 
-      className="bg-white rounded-2xl shadow-md hover:shadow-xl hover:border-blue-200 border border-transparent transition-all duration-300 overflow-hidden cursor-pointer group"
+      className="cursor-pointer group"
       onClick={() => onClick(clip)}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
     >
-      {/* Video Thumbnail */}
-      <div className="relative h-64 bg-gray-200 flex items-center justify-center overflow-hidden">
+      {/* Video Card Container */}
+      <div 
+        className="bg-white rounded-2xl shadow-md hover:shadow-xl hover:border-blue-200 border border-transparent transition-all duration-300 overflow-hidden"
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+      >
+        {/* Video Thumbnail */}
+        <div className="relative w-full aspect-video bg-gray-200 flex items-center justify-center overflow-hidden">
         {/* Loading state */}
         {thumbnailLoading && (
           <div className="absolute inset-0 flex items-center justify-center bg-gray-200">
@@ -128,14 +132,15 @@ const VideoClipCard = ({ clip, onClick }) => {
         <div className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
           {formatTimestamp(timestamp_start)}
         </div>
+        </div>
       </div>
       
-      {/* Card content */}
-      {/* <div className="p-4">
-        <p className="text-md font-semibold truncate text-gray-900">
+      {/* Title Below Card */}
+      <div className="pt-2 px-1">
+        <p className="text-sm font-medium text-gray-800 line-clamp-2 leading-snug">
           {clip_text || 'Video clip segment'}
         </p>
-      </div> */}
+      </div>
     </div>
   );
 };

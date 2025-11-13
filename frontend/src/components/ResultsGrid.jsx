@@ -21,11 +21,14 @@ const ResultsGrid = ({ clips, total, query, onClipClick }) => {
       {/* Results grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
         {clips.map((clip, index) => (
-          <VideoClipCard
-            key={`${clip.video_id}-${clip.timestamp_start}-${index}`}
-            clip={clip}
-            onClick={onClipClick}
-          />
+          <div key={`${clip.video_id}-${clip.timestamp_start}-${index}`} className="flex justify-center">
+            <div className="w-full max-w-md">
+              <VideoClipCard
+                clip={clip}
+                onClick={onClipClick}
+              />
+            </div>
+          </div>
         ))}
       </div>
     </div>

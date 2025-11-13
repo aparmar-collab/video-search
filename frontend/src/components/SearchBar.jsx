@@ -6,6 +6,7 @@ const SearchBar = ({ onSearch, isLoading, onSearchTypeChange }) => {
   const [showDropdown, setShowDropdown] = useState(false);
   const [visual, setVisual] = useState(true);
   const [audio, setAudio] = useState(true);
+  const [topK, setTopK] = useState(10);
 
   // Determine search type based on selections
   const getSearchType = () => {
@@ -20,7 +21,7 @@ const SearchBar = ({ onSearch, isLoading, onSearchTypeChange }) => {
     if (query.trim()) {
       const searchType = getSearchType();
       console.log(searchType)
-      onSearch(query, searchType);
+      onSearch(query, searchType, topK);
     }
   };
 
@@ -96,7 +97,7 @@ const SearchBar = ({ onSearch, isLoading, onSearchTypeChange }) => {
           {showDropdown && (
             <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl border border-gray-200 shadow-lg z-50">
               <div className="p-4">
-                <h3 className="text-sm font-semibold text-gray-700 mb-3">Advanced Parameters</h3>
+                <h3 className="text-sm font-semibold text-gray-700 mb-3">Additional Configurations</h3>
                 <p className="text-xs text-gray-500 mb-4">Select search options</p>
                 
                 <div className="space-y-3">
@@ -121,6 +122,21 @@ const SearchBar = ({ onSearch, isLoading, onSearchTypeChange }) => {
                     />
                     <span className="text-sm font-medium text-gray-700">Audio</span>
                   </label>
+
+                  {/* Top K Input */}
+                  <div className="flex items-center gap-3 p-2">
+                    <label className="text-sm font-medium text-gray-700 flex-1">
+                      Results (n)
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="100"
+                      value={topK}
+                      onChange={(e) => setTopK(Math.max(1, parseInt(e.target.value)))}
+                      className="w-16 px-2 py-1 border border-gray-300 rounded text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
                 </div>
 
                 {/* Search Type Display */}
