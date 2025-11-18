@@ -1,13 +1,12 @@
 import axios from 'axios';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-const API_GATEWAY_URL = import.meta.env.VITE_API_GATEWAY_URL
 const BACKEND_ALB_URL = import.meta.env.VITE_BACKEND_ALB_URL
 
 const BACKEND_URL = API_BASE_URL
 
 const api = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: BACKEND_URL,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -64,39 +63,17 @@ export const searchClips = async (query, topK = 10, searchType = 'vector') => {
   }
 };
 
-export const processVideo = async (videoUrl) => {
-  try {
-    const response = await api.post('/process-video', {
-      video_url: videoUrl,
-    });
-    return response.data;
-  } catch (error) {
-    console.error('Error processing video:', error);
-    throw error;
-  }
-};
-
-export const getVideoStatus = async (videoId) => {
-  try {
-    const response = await api.get(`/video-status/${videoId}`);
-    return response.data;
-  } catch (error) {
-    console.error('Error getting video status:', error);
-    throw error;
-  }
-};
-
-export const askQuestion = async (question) => {
-  try {
-    const response = await api.post('/ask', {
-      question,
-    });
-    return response.data;
-  } catch (error) {
-    console.error('Error asking question:', error);
-    throw error;
-  }
-};
+// export const askQuestion = async (question) => {
+//   try {
+//     const response = await api.post('/ask', {
+//       question,
+//     });
+//     return response.data;
+//   } catch (error) {
+//     console.error('Error asking question:', error);
+//     throw error;
+//   }
+// };
 
 export const listAllVideos = async () => {
   try {
@@ -115,12 +92,28 @@ export const listAllVideos = async () => {
   }
 };
 
-export const getVideoDetails = async (videoId) => {
+export const getPresignedUploadUrl = async (filename) => {
   try {
-    const response = await api.get(`/videos/${videoId}`);
-    return response.data;
+    const response = await fetch(`${BACKEND_URL}/generate-upload-presigned-url?filename=${encodeURIComponent(filename)}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to generate presigned URL: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    console.log('Presigned URL generated:', {
+      s3_key: data.s3_key,
+      expires_in: data.expires_in
+    });
+    
+    return data;
   } catch (error) {
-    console.error('Error getting video details:', error);
+    console.error('Error getting presigned upload URL:', error);
     throw error;
   }
 };

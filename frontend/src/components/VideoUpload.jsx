@@ -2,25 +2,15 @@ import React, { useState } from 'react';
 import { Upload, CheckCircle, XCircle, Loader2, Video, AlertCircle, FileVideo, UploadCloud } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { upload_to_s3, validate_video_file } from '../utils/s3Upload';
-import { processVideo, getVideoStatus } from '../services/api';
+import { getPresignedUploadUrl } from '../services/api';
 
 const VideoUpload = () => {
   const [file, setFile] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploadStatus, setUploadStatus] = useState('idle'); // idle, uploading, processing, completed, error
+  const [uploadStatus, setUploadStatus] = useState('idle'); // idle, uploading, completed, error
   const [s3Url, setS3Url] = useState('');
-  const [videoId, setVideoId] = useState('');
-  const [processingProgress, setProcessingProgress] = useState(0);
   const [error, setError] = useState('');
-  const [processingStatus, setProcessingStatus] = useState(null);
 
-  // S3 Configuration (should be in environment variables)
-  const s3_config = {
-    accessKeyId: import.meta.env.VITE_AWS_ACCESS_KEY_ID || '',
-    secretAccessKey: import.meta.env.VITE_AWS_SECRET_ACCESS_KEY || '',
-    region: import.meta.env.VITE_AWS_REGION || 'us-east-1',
-    bucket: import.meta.env.VITE_AWS_BUCKET || 'jod-testing-anything',
-  };
 
   const handle_file_select = (e) => {
     const selected_file = e.target.files[0];
@@ -40,31 +30,24 @@ const VideoUpload = () => {
   const handle_upload = async () => {
     if (!file) return;
 
-    // Check S3 credentials
-    if (!s3_config.accessKeyId || !s3_config.secretAccessKey) {
-      setError('AWS credentials not configured. Please set environment variables.');
-      return;
-    }
-
     try {
-      // Step 1: Upload to S3
       setUploadStatus('uploading');
       setError('');
       
-      const url = await upload_to_s3(file, s3_config, (progress) => {
-        setUploadProgress(progress);
+      console.log('Requesting presigned URL for:', file.name);
+      const presignedData = await getPresignedUploadUrl(file.name);
+
+      console.log(presignedData)
+      
+      // Upload to S3 using presigned URL
+      const s3_path = await upload_to_s3(file, presignedData, (progress) => {
+        console.log(`Upload progress: ${progress}%`);
+        setUploadProgress(progress)
       });
 
-      setS3Url(url);
-      console.log('Video uploaded to S3:', url);
-
-      // Step 2: Process video via backend
-      setUploadStatus('processing');
-      const response = await processVideo(url);
-      setVideoId(response.video_id);
-
-      // Step 3: Poll for processing status
-      poll_processing_status(response.video_id);
+      setS3Url(s3_path);
+      console.log('✓ Video uploaded to S3:', s3_path);
+      setUploadStatus('completed');
 
     } catch (err) {
       console.error('Upload error:', err);
@@ -73,42 +56,11 @@ const VideoUpload = () => {
     }
   };
 
-  const poll_processing_status = async (vid_id) => {
-    const poll_interval = setInterval(async () => {
-      try {
-        const status = await getVideoStatus(vid_id);
-        setProcessingStatus(status);
-        
-        if (status.progress) {
-          setProcessingProgress(status.progress);
-        }
-
-        if (status.status === 'completed') {
-          clearInterval(poll_interval);
-          setUploadStatus('completed');
-        } else if (status.status === 'failed') {
-          clearInterval(poll_interval);
-          setUploadStatus('error');
-          setError(status.error || 'Video processing failed');
-        }
-      } catch (err) {
-        console.error('Status polling error:', err);
-      }
-    }, 2000); // Poll every 2 seconds
-
-    // Stop polling after 10 minutes
-    setTimeout(() => clearInterval(poll_interval), 600000);
-  };
-
   const reset_form = () => {
     setFile(null);
-    setUploadProgress(0);
     setUploadStatus('idle');
     setS3Url('');
-    setVideoId('');
-    setProcessingProgress(0);
     setError('');
-    setProcessingStatus(null);
   };
 
   return (
@@ -189,7 +141,7 @@ const VideoUpload = () => {
               className="w-full flex items-center justify-center gap-3 px-8 py-5 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl font-semibold text-lg shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
             >
               <Upload size={24} />
-              Upload & Process Video
+              Upload Video to S3
             </button>
           </>
         ) : (
@@ -213,46 +165,6 @@ const VideoUpload = () => {
               </div>
             )}
 
-            {/* Processing Progress */}
-            {uploadStatus === 'processing' && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-center mb-4">
-                  <Loader2 size={48} className="text-primary-600 animate-spin" />
-                </div>
-                <div className="text-center">
-                  <p className="text-lg font-medium text-gray-900 mb-2">
-                    Processing Video
-                  </p>
-                  <p className="text-gray-600 mb-4">
-                    Generating embeddings with TwelveLabs...
-                  </p>
-                  {processingProgress > 0 && (
-                    <>
-                      <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden mb-2">
-                        <div
-                          className="bg-gradient-to-r from-green-600 to-green-400 h-full transition-all duration-300 rounded-full"
-                          style={{ width: `${processingProgress}%` }}
-                        />
-                      </div>
-                      <p className="text-sm text-gray-500">{processingProgress}% complete</p>
-                    </>
-                  )}
-                </div>
-                {processingStatus && (
-                  <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-                    <p className="text-sm text-gray-600">
-                      <strong>Status:</strong> {processingStatus.status}
-                    </p>
-                    {processingStatus.clips_indexed && (
-                      <p className="text-sm text-gray-600">
-                        <strong>Clips Indexed:</strong> {processingStatus.clips_indexed}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
             {/* Completion */}
             {uploadStatus === 'completed' && (
               <div className="text-center space-y-4">
@@ -260,28 +172,20 @@ const VideoUpload = () => {
                   <CheckCircle size={48} className="text-green-600" />
                 </div>
                 <h3 className="text-2xl font-bold text-gray-900">
-                  Video Processed Successfully!
+                  Video Uploaded Successfully!
                 </h3>
                 <p className="text-gray-600">
-                  Your video has been uploaded and indexed. You can now search for clips.
+                  Your video has been uploaded to S3.
                 </p>
-                {processingStatus?.clips_indexed && (
-                  <div className="inline-block px-4 py-2 bg-green-50 border border-green-200 rounded-lg">
-                    <p className="text-green-700 font-medium">
-                      {processingStatus.clips_indexed} clips indexed
-                    </p>
-                  </div>
-                )}
+                <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <p className="text-sm text-blue-700 break-all">
+                    <strong>S3 Path:</strong> {s3Url}
+                  </p>
+                </div>
                 <div className="pt-4 space-y-3">
-                  <a
-                    href="/"
-                    className="btn-primary inline-block"
-                  >
-                    Go to Search
-                  </a>
                   <button
                     onClick={reset_form}
-                    className="btn-secondary block w-full"
+                    className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl font-semibold hover:shadow-lg transition-all"
                   >
                     Upload Another Video
                   </button>

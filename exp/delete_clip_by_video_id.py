@@ -11,7 +11,7 @@ load_dotenv()
 
 # Constants
 INDEX_NAME = "video_clips_consolidated"
-CLIP_ID_TO_DELETE = "5c4e51cb-e411-43f5-bc4f-8f1f19b15eec"
+CLIP_ID_TO_DELETE = "97fa4474-3f4d-43a1-b0ce-b84bfc5358f4"
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)

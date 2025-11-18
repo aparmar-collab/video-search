@@ -1,89 +1,81 @@
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
-import { Upload } from '@aws-sdk/lib-storage';
+// Presigned URL upload - no AWS SDK needed, uses native fetch API
 
 /**
- * Upload a file to S3 with progress tracking
+ * Upload a file to S3 using presigned URL
  * @param {File} file - The file to upload
- * @param {Object} config - AWS configuration
+ * @param {Object} presignedData - Presigned URL data from backend
  * @param {Function} onProgress - Progress callback (percent)
- * @returns {Promise<string>} - The S3 URL of the uploaded file
+ * @returns {Promise<string>} - The S3 path of the uploaded file
  */
-export const upload_to_s3 = async (file, config, onProgress) => {
-  const { accessKeyId, secretAccessKey, region, bucket } = config;
+export const upload_to_s3 = async (file, presignedData, onProgress) => {
+  const { presigned_url, s3_path } = presignedData;
 
-  // Create S3 client
-  const s3Client = new S3Client({
-    region: region,
-    credentials: {
-      accessKeyId: accessKeyId,
-      secretAccessKey: secretAccessKey,
-    },
-  });
-
-  // Generate unique filename
-  const timestamp = Date.now();
-  const sanitized_name = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-  const key = `videos/${timestamp}_${sanitized_name}`;
+  if (!presigned_url) {
+    throw new Error('Presigned URL not provided');
+  }
 
   try {
-    // For files smaller than 100MB, use simple PutObject (no multipart, no checksum issues)
-    const use_simple_upload = file.size < 100 * 1024 * 1024;
-    
-    // Convert File to ArrayBuffer for compatibility
+    // Convert File to ArrayBuffer
     const fileBuffer = await file.arrayBuffer();
-    
-    if (use_simple_upload) {
-      // Simple upload for smaller files
-      const command = new PutObjectCommand({
-        Bucket: bucket,
-        Key: key,
-        Body: new Uint8Array(fileBuffer),
-        ContentType: file.type,
-        ACL: 'public-read',
-      });
+    const uint8Array = new Uint8Array(fileBuffer);
 
-      // Track progress manually for simple upload
+    // For files smaller than 100MB, use simple PUT
+    const use_simple_upload = file.size < 100 * 1024 * 1024;
+
+    if (use_simple_upload) {
+      // Simple PUT request for smaller files
       if (onProgress) {
         onProgress(50); // Show 50% while uploading
       }
 
-      await s3Client.send(command);
+      const response = await fetch(presigned_url, {
+        method: 'PUT',
+        body: uint8Array,
+        headers: {
+          'Content-Type': file.type,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`S3 upload failed with status ${response.status}`);
+      }
 
       if (onProgress) {
         onProgress(100); // Complete
       }
     } else {
-      // Multipart upload for larger files
-      const upload = new Upload({
-        client: s3Client,
-        params: {
-          Bucket: bucket,
-          Key: key,
-          Body: new Uint8Array(fileBuffer),
-          ContentType: file.type,
-          ACL: 'public-read',
-        },
-        // Upload configuration
-        queueSize: 4,
-        partSize: 1024 * 1024 * 10, // 10MB per part
-        leavePartsOnError: false,
-      });
+      // Multipart upload for larger files using XMLHttpRequest for progress tracking
+      const chunkSize = 5 * 1024 * 1024; // 5MB chunks
+      const totalChunks = Math.ceil(file.size / chunkSize);
 
-      // Track progress
-      upload.on('httpUploadProgress', (progress) => {
-        const percent = Math.round((progress.loaded / progress.total) * 100);
-        if (onProgress) {
-          onProgress(percent);
+      for (let i = 0; i < totalChunks; i++) {
+        const start = i * chunkSize;
+        const end = Math.min(start + chunkSize, file.size);
+        const chunk = uint8Array.slice(start, end);
+
+        const response = await fetch(presigned_url, {
+          method: 'PUT',
+          body: chunk,
+          headers: {
+            'Content-Type': file.type,
+            'Content-Range': `bytes ${start}-${end - 1}/${file.size}`,
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`S3 chunk upload failed at chunk ${i + 1}/${totalChunks}`);
         }
-      });
 
-      // Execute upload
-      await upload.done();
+        // Update progress
+        const progress = Math.round(((i + 1) / totalChunks) * 100);
+        if (onProgress) {
+          onProgress(progress);
+        }
+      }
     }
 
-    // Return public URL
-    const url = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
-    return url;
+    console.log('✓ File uploaded successfully to S3');
+    return s3_path;
   } catch (error) {
     console.error('S3 upload error:', error);
     throw new Error(`Failed to upload to S3: ${error.message}`);

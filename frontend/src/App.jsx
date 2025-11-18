@@ -9,8 +9,6 @@ import { searchClips } from './services/api';
 import { AlertCircle, Search } from 'lucide-react';
 import { motion } from 'framer-motion';
 
-import { setActiveQuery } from './components/SearchBar';
-
 function App() {
   const [currentPage, setCurrentPage] = useState('explore'); // 'search' or 'upload'
   const [clips, setClips] = useState([]);
@@ -97,7 +95,12 @@ function App() {
                 transition={{ duration: 0.5, ease: 'easeInOut' }}
                 className="w-full max-w-2xl mb-6"
               >
-                <SearchBar onSearch={handle_search} isLoading={isLoading} />
+                <SearchBar
+                  onSearch={handle_search}
+                  isLoading={isLoading}
+                  queryValue={query}
+                  onQueryChange={setQuery}
+                />
               </motion.div>
 
               {/* Suggestion chips - Only show when not searched */}
@@ -111,7 +114,6 @@ function App() {
                   <button
                     onClick={() => {
                       handle_search('person walking in park');
-                      setActiveQuery('person walking in park');
                     }}
                     className="px-4 py-2 bg-white border border-blue-200 rounded-full hover:border-blue-600 hover:bg-blue-50 transition-all text-sm text-gray-700"
                   >
@@ -120,7 +122,6 @@ function App() {
                   <button
                     onClick={() => {
                       handle_search('sunset scene')
-                      setActiveQuery('sunset scene')
                     }
                   }
                     className="px-4 py-2 bg-white border border-blue-200 rounded-full hover:border-blue-600 hover:bg-blue-50 transition-all text-sm text-gray-700"
@@ -130,7 +131,6 @@ function App() {
                   <button
                     onClick={() => {
                       handle_search('people talking')
-                      setActiveQuery('people talking')
                     }
                     }
                     className="px-4 py-2 bg-white border border-blue-200 rounded-full hover:border-blue-600 hover:bg-blue-50 transition-all text-sm text-gray-700"

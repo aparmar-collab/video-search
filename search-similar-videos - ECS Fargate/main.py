@@ -57,6 +57,9 @@ async def startup_event():
         hybrid_pipeline_exists = _create_hybrid_search_pipeline(opensearch_client)
         vector_pipeline_exists = _create_vector_search_pipeline(opensearch_client)
         
+        # logger.info("Configuring S3 CORS policy...")
+        # _configure_s3_cors(s3_client)
+        
         logger.info("✓ All clients and pipelines initialized successfully")
     except Exception as e:
         logger.error(f"✗ Startup initialization failed: {e}", exc_info=True)
@@ -154,7 +157,6 @@ async def search_videos(request: SearchRequest):
         logger.error(f"Error in search: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/list", response_model=VideosListResponse)
 async def list_all_videos():
     """
@@ -188,6 +190,53 @@ async def list_all_videos():
     
     except Exception as e:
         logger.error(f"Error in list_videos: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/generate-upload-presigned-url")
+async def generate_upload_url(filename: str):
+    """
+    Generate a presigned URL for direct S3 upload from frontend
+    Frontend uses this URL to upload video directly to S3 without exposing credentials
+    """
+    try:
+        if not filename or len(filename.strip()) == 0:
+            raise HTTPException(status_code=400, detail="filename is required")
+        
+        # Sanitize filename
+        sanitized_name = "".join(c if c.isalnum() or c in ".-_" else "_" for c in filename)
+        
+        s3_key = f"{sanitized_name}"
+        
+        # Get bucket name from environment
+        bucket_name = os.environ.get('AWS_S3_BUCKET')
+        if not bucket_name:
+            raise ValueError("AWS_S3_BUCKET environment variable not set")
+        
+        # Generate presigned URL for PUT operation (15 minutes expiry)
+        # Note: Do NOT include ContentType in Params - it creates a constraint that must be matched exactly
+        presigned_url = s3_client.generate_presigned_url(
+            'put_object',
+            Params={
+                'Bucket': bucket_name,
+                'Key': s3_key
+            },
+            ExpiresIn=900  # 15 minutes
+        )
+        
+        logger.info(f"✓ Generated presigned upload URL for: {s3_key}")
+        
+        return {
+            "presigned_url": presigned_url,
+            "s3_key": s3_key,
+            "s3_path": f"s3://{bucket_name}/{s3_key}",
+            "expires_in": 900
+        }
+        
+    except ValueError as e:
+        logger.error(f"Configuration error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error generating presigned URL: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -421,35 +470,69 @@ def hybrid_search(client, query_embedding: List[float], query_text: str, top_k: 
 # CHANGE 4: Updated vector_search to query emb_vis_text and emb_audio
 def vector_search(client, query_embedding: List[float], top_k: int = 10) -> List[Dict]:
     """Vector-only k-NN search on visual-text and audio embeddings with normalization"""
+    # search_body = {
+    #     "size": TOP_K,
+    #     "query": {
+    #         "hybrid": {
+    #             "queries": [
+    #                 {
+    #                     "knn": {
+    #                         "emb_vis_text": 
+    #                         {
+    #                             "vector": query_embedding, 
+    #                             "min_score": INNER_MIN_SCORE_VISUAL
+    #                         }
+    #                     }
+    #                 },
+    #                 {
+    #                     "knn": {
+    #                         "emb_audio": 
+    #                         {
+    #                             "vector": query_embedding, 
+    #                             "min_score": INNER_MIN_SCORE_AUDIO
+    #                         }
+    #                     }
+    #                 }
+    #             ]
+    #         }
+    #     },
+    #     "_source": ["video_id", "video_path", "clip_id", "timestamp_start",
+    #                 "timestamp_end", "clip_text", "thumbnail_path", "video_name", "clip_duration"]
+    # }
+################################################################ bool query did not work with search pipeline and also it allows us to have results matching the req. no.s of sub-queries 
+################################################################ (its more of an atomic approach) -- TO TRY IT AGAIN TOMORROW
     search_body = {
-        "size": TOP_K,
-        "query": {
-            "hybrid": {
-                "queries": [
-                    {
-                        "knn": {
-                            "emb_vis_text": 
-                            {
-                                "vector": query_embedding, 
-                                "min_score": INNER_MIN_SCORE_VISUAL
-                            }
-                        }
-                    },
-                    {
-                        "knn": {
-                            "emb_audio": 
-                            {
-                                "vector": query_embedding, 
-                                "min_score": INNER_MIN_SCORE_AUDIO
-                            }
+    "size": TOP_K,
+    "query": {
+        "bool": {
+            "should": [
+                {
+                    "knn": {
+                        "emb_vis_text": {
+                            "vector": query_embedding,
+                            "min_score": INNER_MIN_SCORE_VISUAL
                         }
                     }
-                ]
-            }
-        },
-        "_source": ["video_id", "video_path", "clip_id", "timestamp_start",
-                    "timestamp_end", "clip_text", "thumbnail_path", "video_name", "clip_duration"]
+                },
+                {
+                    "knn": {
+                        "emb_audio": {
+                            "vector": query_embedding,
+                            "min_score": INNER_MIN_SCORE_AUDIO
+                        }
+                    }
+                }
+            ],
+            "minimum_should_match": 2
+        }
+    },
+    "_source": [
+        "video_id", "video_path", "clip_id", "timestamp_start",
+        "timestamp_end", "clip_text", "thumbnail_path",
+        "video_name", "clip_duration"
+        ]
     }
+################################################################ 
 
     if vector_pipeline_exists:
         search_params = {
@@ -597,31 +680,34 @@ def _create_vector_search_pipeline(client):
     #         }
     #     ]
     # }
-    # pipeline_body = {
-    #     "description": "Post-processing pipeline for vector search with min-max normalization (0-1 range)",
-    #     "phase_results_processors": [
-    #         {
-    #             "normalization-processor": {
-    #                 "normalization": {
-    #                     "technique": "l2"
-    #                 }
-    #             }
-    #         }
-    #     ]
-    # }
     pipeline_body = {
-            "description": "Normalization → RRF → final min-max normalization",
-            "phase_results_processors": [
-                {
-                "score-ranker-processor": {
-                    "combination": {
-                    "technique": "rrf",
-                    "rank_constant": 60
+        "description": "Post-processing pipeline for vector search with min-max normalization (0-1 range)",
+        "phase_results_processors": [
+            {
+                "normalization-processor": {
+                    "normalization": {
+                        "technique": "l2"
+                    },
+                    "combination": {  # ✅ REQUIRED
+                        "technique": "arithmetic_mean"
                     }
                 }
-                }
-            ]
-        }
+            }
+        ]
+    }
+    # pipeline_body = {
+    #         "description": "Normalization → RRF → final min-max normalization",
+    #         "phase_results_processors": [
+    #             {
+    #             "score-ranker-processor": {
+    #                 "combination": {
+    #                 "technique": "rrf",
+    #                 "rank_constant": 60
+    #                 }
+    #             }
+    #             }
+    #         ]
+    #     }
 
     
     try:
@@ -780,6 +866,36 @@ def parse_search_results_vector(response):
     # print(results)
 
     return results
+
+
+# def _configure_s3_cors(s3_client):
+#     """Configure restrictive CORS policy on S3 bucket for video uploads"""
+#     bucket_name = os.environ.get('AWS_S3_BUCKET')
+#     if not bucket_name:
+#         logger.warning("AWS_S3_BUCKET not set, skipping CORS configuration")
+#         return
+    
+#     cors_config = {
+#         'CORSRules': [
+#             {
+#                 'AllowedOrigins': [
+#                     'http://localhost:3000',
+#                     'http://condenast-fe.s3-website-us-east-1.amazonaws.com',
+#                     'https://condenast-fe.s3-website-us-east-1.amazonaws.com'
+#                 ],
+#                 'AllowedMethods': ['PUT', 'POST', 'GET', 'HEAD'],
+#                 'AllowedHeaders': ['*'],
+#                 'MaxAgeSeconds': 3000,
+#                 'ExposeHeaders': ['ETag', 'x-amz-version-id']
+#             }
+#         ]
+#     }
+    
+#     try:
+#         s3_client.put_bucket_cors(Bucket=bucket_name, CORSConfiguration=cors_config)
+#         logger.info(f"✓ S3 CORS policy configured for bucket: {bucket_name}")
+#     except Exception as e:
+#         logger.warning(f"Could not configure S3 CORS (may require manual setup): {e}")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
