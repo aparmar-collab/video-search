@@ -3,6 +3,9 @@ import json
 import boto3
 import os
 import logging
+import base64
+import uuid
+import datetime
 from opensearchpy import OpenSearch, RequestsHttpConnection, AWSV4SignerAuth
 from typing import List, Dict, Optional
 from pydantic import BaseModel
@@ -29,7 +32,7 @@ app.add_middleware(
 INDEX_NAME = "video_clips_consolidated"
 VECTOR_PIPELINE = "vector-norm-pipeline-consolidated-index-rrf"
 MIN_SCORE = 0.5
-INNER_MIN_SCORE_VISUAL = INNER_MIN_SCORE_AUDIO = INNER_MIN_SCORE = 0.6
+INNER_MIN_SCORE_VISUAL = INNER_MIN_SCORE_AUDIO = INNER_MIN_SCORE_TRANSCRIPTION = INNER_MIN_SCORE = 0.6
 INNER_TOP_K = 100
 TOP_K = 50
 
@@ -67,7 +70,8 @@ async def startup_event():
 
 
 class SearchRequest(BaseModel):
-    query_text: str
+    query_text: Optional[str] = None
+    image_base64: Optional[str] = None
     top_k: int = 10
     search_type: str = "hybrid"
 
@@ -103,50 +107,85 @@ async def health_check():
 @app.post("/search", response_model=SearchResponse)
 async def search_videos(request: SearchRequest):
     """
-    Search videos using hybrid/vector/text search
-    Performs hybrid search on OpenSearch Cluster
-    Combines text embedding + keyword matching
+    Unified search endpoint - handles both text and image searches
+    - Text search: Uses query_text with specified search_type
+    - Image search: Uses image_base64, generates embedding, performs image-specific search
     """
     try:
         query_text = request.query_text
+        image_base64 = request.image_base64
         top_k = request.top_k
         search_type = request.search_type
+        INDEX_NAME = 'video_clips_consolidated'
         
-        if not query_text:
-            raise HTTPException(status_code=400, detail="query_text is required")
+        # Validate that at least one input is provided
+        if not query_text and not image_base64:
+            raise HTTPException(status_code=400, detail="Either query_text or image_base64 is required")
         
-        logger.info(f"Searching for: '{query_text}' (type: {search_type}, top_k: {top_k})")
+        # IMAGE SEARCH PATH
+        if image_base64:
+            logger.info(f"📷 Image search requested (top_k: {top_k})")
+            
+            # Validate image
+            is_valid, error_msg = validate_image(image_base64)
+            if not is_valid:
+                raise HTTPException(status_code=400, detail=error_msg)
+            
+            logger.info("✓ Image validation passed")
+            logger.info(f"Processing image base64 of length: {len(image_base64)} characters")
+            
+            # Generate image embedding
+            logger.info("🔄 Generating image embedding from base64 using Marengo")
+            query_embedding = generate_image_embedding(bedrock_runtime, image_base64)
+            
+            if not query_embedding:
+                raise HTTPException(status_code=500, detail="Failed to generate image embedding")
+            
+            logger.info(f"✓ Generated image embedding with {len(query_embedding)} dimensions")
+            
+            # Perform image-specific search
+            logger.info("🔍 Performing image-specific search using emb_vis_image")
+            results = search_with_image(opensearch_client, query_embedding, top_k, INDEX_NAME)
+            
+            query_display = ""  # Empty query for image search
+            search_type_display = "image"
         
-        # Generate query embedding using Bedrock Marengo
-        query_embedding = generate_text_embedding(bedrock_runtime, query_text)
-        
-        if not query_embedding:
-            raise HTTPException(status_code=500, detail="Failed to generate query embedding")
-        
-        logger.info(f"Generated embedding with {len(query_embedding)} dimensions")
-        
-        # Perform search based on type
-        if search_type == 'hybrid':
-            results = hybrid_search(opensearch_client, query_embedding, query_text, top_k)
-        elif search_type == 'vector':
-            results = vector_search(opensearch_client, query_embedding, top_k)
-        elif search_type == 'visual':
-            results = visual_search(opensearch_client, query_embedding, top_k)
-        elif search_type == 'audio':
-            results = audio_search(opensearch_client, query_embedding, top_k)
-        elif search_type == 'text':
-            results = text_search(opensearch_client, query_text, top_k)
+        # TEXT SEARCH PATH
         else:
-            raise HTTPException(status_code=400, detail=f"Invalid search_type: {search_type}")
+            logger.info(f"🔍 Text search: '{query_text}' (type: {search_type}, top_k: {top_k})")
+            logger.info("Generating embedding from text using Marengo")
+            query_embedding = generate_text_embedding(bedrock_runtime, query_text)
+            
+            if not query_embedding:
+                raise HTTPException(status_code=500, detail="Failed to generate query embedding")
+            
+            logger.info(f"Generated text embedding with {len(query_embedding)} dimensions")
+            
+            # Perform search based on type for text queries
+            if search_type == 'hybrid':
+                results = hybrid_search(opensearch_client, query_embedding, query_text, top_k, INDEX_NAME)
+            elif search_type == 'vector':
+                results = vector_search(opensearch_client, query_embedding, top_k, INDEX_NAME)
+            elif search_type == 'visual':
+                results = visual_search(opensearch_client, query_embedding, top_k, INDEX_NAME)
+            elif search_type == 'audio':
+                results = audio_search(opensearch_client, query_embedding, top_k, INDEX_NAME)
+            # elif search_type == 'text':
+            #     results = text_search(opensearch_client, query_text, top_k)
+            else:
+                raise HTTPException(status_code=400, detail=f"Invalid search_type: {search_type}")
+            
+            query_display = query_text
+            search_type_display = search_type
         
         # Convert S3 paths to presigned URLs
         results = convert_s3_to_presigned_urls(s3_client, results)
         
-        logger.info(f"Found {len(results)} results")
+        logger.info(f"✓ Search completed, found {len(results)} results")
         
         return SearchResponse(
-            query=query_text,
-            search_type=search_type,
+            query=query_display,
+            search_type=search_type_display,
             total=len(results),
             clips=results
         )
@@ -156,6 +195,101 @@ async def search_videos(request: SearchRequest):
     except Exception as e:
         logger.error(f"Error in search: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/search-3", response_model=SearchResponse)
+async def search_videos_marengo3(request: SearchRequest):
+    """
+    Marengo 3 unified search endpoint - handles text, image, or combined text+image searches
+    - Text only: Uses query_text with specified search_type
+    - Image only: Uses image_base64, generates embedding via Marengo 3
+    - Combined: Uses both query_text and image_base64 for multimodal search
+    """
+    try:
+        query_text = request.query_text
+        image_base64 = request.image_base64
+        top_k = request.top_k
+        search_type = request.search_type
+        
+        # Validate that at least one input is provided
+        if not query_text and not image_base64:
+            raise HTTPException(status_code=400, detail="Either query_text or image_base64 is required")
+        
+        # Validate image if provided
+        if image_base64:
+            is_valid, error_msg = validate_image(image_base64)
+            if not is_valid:
+                raise HTTPException(status_code=400, detail=error_msg)
+            logger.info("✓ Image validation passed")
+        
+        # Determine search type for logging
+        if query_text and image_base64:
+            logger.info(f"🔄 Multimodal search (Marengo 3): text='{query_text[:50]}...' + image (top_k: {top_k})")
+            search_input_type = "multimodal"
+        elif image_base64:
+            logger.info(f"📷 Image-only search (Marengo 3) (top_k: {top_k})")
+            search_input_type = "image"
+        else:
+            logger.info(f"🔍 Text-only search (Marengo 3): '{query_text}' (type: {search_type}, top_k: {top_k})")
+            search_input_type = "text"
+        
+        # Generate unified embedding using Marengo 3
+        logger.info(f"🔄 Generating {search_input_type} embedding using Marengo 3")
+        query_embedding = generate_embedding_marengo3(bedrock_runtime, text=query_text, image_base64=image_base64)
+        
+        if not query_embedding:
+            raise HTTPException(status_code=500, detail=f"Failed to generate {search_input_type} embedding (Marengo 3)")
+        
+        logger.info(f"✓ Generated {search_input_type} embedding (Marengo 3) with {len(query_embedding)} dimensions")
+        
+        # Perform search based on type
+        logger.info(f"🔍 Performing {search_type} search (Marengo 3)")
+        if search_type == 'hybrid':
+            # Hybrid search not yet implemented for Marengo 3, fallback to vector
+            logger.info("⚠️ Hybrid search not yet implemented for Marengo 3, using vector search instead")
+            results = vector_search_marengo3(opensearch_client, query_embedding, top_k, 'video_clips_3')
+        elif search_type == 'vector':
+            # All three: visual + audio + transcription (weights: 0.5, 0.3, 0.2)
+            results = vector_search_marengo3(opensearch_client, query_embedding, top_k, 'video_clips_3')
+        elif search_type == 'vector_visual_audio':
+            # Visual + Audio (weights: 0.6, 0.4)
+            results = vector_search_visual_audio_marengo3(opensearch_client, query_embedding, top_k, 'video_clips_3')
+        elif search_type == 'vector_visual_transcription':
+            # Visual + Transcription (weights: 0.6, 0.4)
+            results = vector_search_visual_transcription_marengo3(opensearch_client, query_embedding, top_k, 'video_clips_3')
+        elif search_type == 'vector_audio_transcription':
+            # Audio + Transcription (weights: 0.5, 0.5)
+            results = vector_search_audio_transcription_marengo3(opensearch_client, query_embedding, top_k, 'video_clips_3')
+        elif search_type == 'visual':
+            results = visual_search_marengo3(opensearch_client, query_embedding, top_k, 'video_clips_3')
+        elif search_type == 'audio':
+            results = audio_search_marengo3(opensearch_client, query_embedding, top_k, 'video_clips_3')
+        elif search_type == 'transcription':
+            results = transcription_search_marengo3(opensearch_client, query_embedding, top_k, 'video_clips_3')
+        else:
+            raise HTTPException(status_code=400, detail=f"Invalid search_type: {search_type}. Supported: vector, vector_visual_audio, vector_visual_transcription, vector_audio_transcription, visual, audio, transcription")
+        
+        query_display = query_text if query_text else ""
+        search_type_display = search_type
+        
+        # Convert S3 paths to presigned URLs
+        results = convert_s3_to_presigned_urls(s3_client, results)
+        
+        logger.info(f"✓ Search (Marengo 3) completed, found {len(results)} results")
+        
+        return SearchResponse(
+            query=query_display,
+            search_type=search_type_display,
+            total=len(results),
+            clips=results
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in search-3: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/list", response_model=VideosListResponse)
 async def list_all_videos():
@@ -213,12 +347,13 @@ async def generate_upload_url(filename: str):
             raise ValueError("AWS_S3_BUCKET environment variable not set")
         
         # Generate presigned URL for PUT operation (15 minutes expiry)
-        # Note: Do NOT include ContentType in Params - it creates a constraint that must be matched exactly
+        # Include ContentType to match the Content-Type header sent by frontend
         presigned_url = s3_client.generate_presigned_url(
             'put_object',
             Params={
                 'Bucket': bucket_name,
-                'Key': s3_key
+                'Key': s3_key,
+                'ContentType': 'video/mp4'
             },
             ExpiresIn=900  # 15 minutes
         )
@@ -263,6 +398,56 @@ def get_opensearch_client():
     )
 
 
+def validate_image(image_base64: str) -> tuple[bool, str]:
+    """
+    Validate if the provided base64 string is a valid image
+    Returns (is_valid, error_message)
+    """
+    try:
+        # Check if base64 string is not empty
+        if not image_base64 or len(image_base64.strip()) == 0:
+            return False, "Image base64 string is empty"
+        
+        # Try to decode base64
+        try:
+            image_data = base64.b64decode(image_base64)
+        except Exception as e:
+            return False, f"Invalid base64 encoding: {str(e)}"
+        
+        # Check minimum size (at least 100 bytes)
+        if len(image_data) < 100:
+            return False, "Image data is too small"
+        
+        # Check maximum size (5MB)
+        max_size = 5 * 1024 * 1024
+        if len(image_data) > max_size:
+            return False, "Image data exceeds 5MB limit"
+        
+        # Validate image magic bytes (signatures)
+        valid_signatures = {
+            b'\xFF\xD8\xFF': 'jpeg',
+            b'\x89\x50\x4E\x47': 'png',
+            b'\x47\x49\x46': 'gif',
+            b'\x52\x49\x46\x46': 'webp'
+        }
+        
+        is_valid_image = False
+        for signature in valid_signatures:
+            if image_data.startswith(signature):
+                is_valid_image = True
+                break
+        
+        if not is_valid_image:
+            return False, "Image format not supported. Supported formats: JPEG, PNG, GIF, WebP"
+        
+        logger.info(f"✓ Image validation passed. Size: {len(image_data)} bytes")
+        return True, ""
+        
+    except Exception as e:
+        logger.error(f"Error validating image: {e}", exc_info=True)
+        return False, f"Image validation error: {str(e)}"
+
+
 def generate_text_embedding(bedrock_runtime, text: str) -> List[float]:
     """Generate embedding for text query using Bedrock Marengo"""
     try:
@@ -288,6 +473,157 @@ def generate_text_embedding(bedrock_runtime, text: str) -> List[float]:
         
     except Exception as e:
         logger.error(f"Error generating text embedding: {e}", exc_info=True)
+        return []
+
+
+def generate_image_embedding(bedrock_runtime, image_base64: str) -> List[float]:
+    """Generate embedding for image query using Bedrock Marengo with base64 image"""
+    try:
+        # Validate base64 string is not empty
+        if not image_base64 or len(image_base64.strip()) == 0:
+            logger.error("Image base64 string is empty")
+            return []
+        
+        logger.info(f"Processing image base64 of length: {len(image_base64)} characters")
+        
+        request_body = {
+            "inputType": "image",
+            "mediaSource": {
+                "base64String": image_base64
+            }
+        }
+        
+        logger.info("Sending image embedding request to Marengo with base64 image")
+        response = bedrock_runtime.invoke_model(
+            modelId="us.twelvelabs.marengo-embed-2-7-v1:0", 
+            body=json.dumps(request_body),
+            contentType="application/json",
+            accept="application/json"
+        )
+        
+        result = json.loads(response['body'].read())
+        logger.info(f"Marengo response: {result}")
+        
+        if 'data' in result and len(result['data']) > 0:
+            embedding = result['data'][0].get('embedding', [])
+            logger.info(f"✓ Generated image embedding with {len(embedding)} dimensions")
+            return embedding
+        
+        logger.warning(f"No embedding data in response. Response: {result}")
+        return []
+        
+    except Exception as e:
+        logger.error(f"Error generating image embedding: {e}", exc_info=True)
+        return []
+
+
+def generate_embedding_marengo3(bedrock_runtime, text: Optional[str] = None, image_base64: Optional[str] = None) -> List[float]:
+    """
+    Generate unified embedding for Marengo 3 - supports text, image, or both
+    When both are provided, Marengo 3 generates a combined multimodal embedding
+    """
+    try:
+        # Validate at least one input is provided
+        if not text and not image_base64:
+            logger.error("Either text or image_base64 must be provided")
+            return []
+        
+        request_body = {}
+        
+        # Text-only request
+        if text and not image_base64:
+            logger.info(f"🔄 Generating text embedding (Marengo 3): '{text[:50]}...'")
+            request_body = {
+                "inputType": "text",
+                "text":{
+                "inputText": text
+                }
+            }
+        
+        # Image-only request
+        elif image_base64 and not text:
+            if not image_base64 or len(image_base64.strip()) == 0:
+                logger.error("Image base64 string is empty")
+                return []
+            
+            logger.info(f"🔄 Generating image embedding (Marengo 3) (base64 length: {len(image_base64)} chars)")
+            request_body = {
+                "inputType": "image",
+                "image":{
+                "mediaSource": {
+                    "base64String": image_base64
+                }
+                }
+            }
+        
+        # Multimodal request with both text and image
+        else:
+            if not image_base64 or len(image_base64.strip()) == 0:
+                logger.error("Image base64 string is empty")
+                return []
+            
+            logger.info(f"🔄 Generating multimodal embedding (Marengo 3): text + image")
+            request_body = {
+                "inputType": "text_image",
+                "text_image":{
+                "inputText": text,
+                "mediaSource": {
+                    "base64String": image_base64
+                }
+                }
+            }
+        
+        logger.info(f"📤 Invoking Marengo 3 model")
+        response = bedrock_runtime.invoke_model(
+            modelId="us.twelvelabs.marengo-embed-3-0-v1:0", 
+            body=json.dumps(request_body),
+            contentType="application/json",
+            accept="application/json"
+        )
+        
+        result = json.loads(response['body'].read())
+        logger.info(f"✓ Marengo 3 response received")
+        
+        if 'data' in result and len(result['data']) > 0:
+            embedding = result['data'][0].get('embedding', [])
+            input_type = "multimodal (text+image)" if (text and image_base64) else ("image" if image_base64 else "text")
+            logger.info(f"✓ Generated {input_type} embedding (Marengo 3) with {len(embedding)} dimensions")
+            return embedding
+        
+        logger.warning(f"No embedding data in Marengo 3 response. Response: {result}")
+        return []
+        
+    except Exception as e:
+        logger.error(f"Error generating embedding (Marengo 3): {e}", exc_info=True)
+        return []
+
+
+def search_with_image(client, query_embedding: List[float], top_k: int = 10, index_name: str = None) -> List[Dict]:
+    """Image-specific search using emb_vis_image field"""
+    if index_name is None:
+        index_name = INDEX_NAME
+    
+    search_body = {
+        "size": top_k,
+        "query": {
+            "knn": {
+                "emb_vis_image": {
+                    "vector": query_embedding,
+                    "min_score": INNER_MIN_SCORE_VISUAL
+                }
+            }
+        },
+        "_source": ["video_id", "video_path", "clip_id", "timestamp_start", 
+                   "timestamp_end", "clip_text", "thumbnail_path", "video_name", "clip_duration", "video_duration_sec"]
+    }
+    
+    try:
+        response = client.search(index=index_name, body=search_body)
+        logger.info(f"✓ Image search completed, found {len(response.get('hits', {}).get('hits', []))} results")
+        return parse_search_results(response)
+        
+    except Exception as e:
+        logger.error(f"Image search error: {e}", exc_info=True)
         return []
 
 
@@ -405,7 +741,7 @@ def get_all_unique_videos(client) -> List[Dict]:
 
 
 # CHANGE 3: Updated hybrid_search to query emb_vis_text and emb_audio
-def hybrid_search(client, query_embedding: List[float], query_text: str, top_k: int = 10) -> List[Dict]:
+def hybrid_search(client, query_embedding: List[float], query_text: str, top_k: int = 10, INDEX_NAME: str = 'video_clips_consolidated') -> List[Dict]:
     """Hybrid search combining vector similarity on visual-text & audio + text matching"""
     search_body = {
         "size": top_k,
@@ -443,7 +779,7 @@ def hybrid_search(client, query_embedding: List[float], query_text: str, top_k: 
             }
         },
         "_source": ["video_id", "video_path", "clip_id", "timestamp_start", 
-                   "timestamp_end", "clip_text", "thumbnail_path", "video_name", "clip_duration"]
+                   "timestamp_end", "clip_text", "thumbnail_path", "video_name", "clip_duration", "video_duration_sec"]
     }
 
     if hybrid_pipeline_exists:
@@ -468,70 +804,70 @@ def hybrid_search(client, query_embedding: List[float], query_text: str, top_k: 
 
 
 # CHANGE 4: Updated vector_search to query emb_vis_text and emb_audio
-def vector_search(client, query_embedding: List[float], top_k: int = 10) -> List[Dict]:
+def vector_search(client, query_embedding: List[float], top_k: int = 10,  INDEX_NAME: str = 'video_clips_consolidated') -> List[Dict]:
     """Vector-only k-NN search on visual-text and audio embeddings with normalization"""
-    # search_body = {
-    #     "size": TOP_K,
-    #     "query": {
-    #         "hybrid": {
-    #             "queries": [
-    #                 {
-    #                     "knn": {
-    #                         "emb_vis_text": 
-    #                         {
-    #                             "vector": query_embedding, 
-    #                             "min_score": INNER_MIN_SCORE_VISUAL
-    #                         }
-    #                     }
-    #                 },
-    #                 {
-    #                     "knn": {
-    #                         "emb_audio": 
-    #                         {
-    #                             "vector": query_embedding, 
-    #                             "min_score": INNER_MIN_SCORE_AUDIO
-    #                         }
-    #                     }
-    #                 }
-    #             ]
-    #         }
-    #     },
-    #     "_source": ["video_id", "video_path", "clip_id", "timestamp_start",
-    #                 "timestamp_end", "clip_text", "thumbnail_path", "video_name", "clip_duration"]
-    # }
+    search_body = {
+        "size": TOP_K,
+        "query": {
+            "hybrid": {
+                "queries": [
+                    {
+                        "knn": {
+                            "emb_vis_text": 
+                            {
+                                "vector": query_embedding, 
+                                "min_score": INNER_MIN_SCORE_VISUAL
+                            }
+                        }
+                    },
+                    {
+                        "knn": {
+                            "emb_audio": 
+                            {
+                                "vector": query_embedding, 
+                                "min_score": INNER_MIN_SCORE_AUDIO
+                            }
+                        }
+                    }
+                ]
+            }
+        },
+        "_source": ["video_id", "video_path", "clip_id", "timestamp_start",
+                    "timestamp_end", "clip_text", "thumbnail_path", "video_name", "clip_duration", "video_duration_sec"]
+    }
 ################################################################ bool query did not work with search pipeline and also it allows us to have results matching the req. no.s of sub-queries 
 ################################################################ (its more of an atomic approach) -- TO TRY IT AGAIN TOMORROW
-    search_body = {
-    "size": TOP_K,
-    "query": {
-        "bool": {
-            "should": [
-                {
-                    "knn": {
-                        "emb_vis_text": {
-                            "vector": query_embedding,
-                            "min_score": INNER_MIN_SCORE_VISUAL
-                        }
-                    }
-                },
-                {
-                    "knn": {
-                        "emb_audio": {
-                            "vector": query_embedding,
-                            "min_score": INNER_MIN_SCORE_AUDIO
-                        }
-                    }
-                }
-            ],
-            "minimum_should_match": 2
-        }
-    },
-    "_source": [
-        "video_id", "video_path", "clip_id", "timestamp_start",
-        "timestamp_end", "clip_text", "thumbnail_path",
-        "video_name", "clip_duration"
-        ]
-    }
+    # search_body = {
+    # "size": TOP_K,
+    # "query": {
+    #     "bool": {
+    #         "should": [
+    #             {
+    #                 "knn": {
+    #                     "emb_vis_text": {
+    #                         "vector": query_embedding,
+    #                         "k": 100
+    #                     }
+    #                 }
+    #             },
+    #             {
+    #                 "knn": {
+    #                     "emb_audio": {
+    #                         "vector": query_embedding,
+    #                         "k": 100
+    #                     }
+    #                 }
+    #             }
+    #         ],
+    #         "minimum_should_match": 1
+    #     }
+    # },
+    # "_source": [
+    #     "video_id", "video_path", "clip_id", "timestamp_start",
+    #     "timestamp_end", "clip_text", "thumbnail_path",
+    #     "video_name", "clip_duration", "video_duration_sec"
+    #     ]
+    # }
 ################################################################ 
 
     if vector_pipeline_exists:
@@ -550,27 +886,27 @@ def vector_search(client, query_embedding: List[float], top_k: int = 10) -> List
     return parse_search_results_vector(response)
 
 
-def text_search(client, query_text: str, top_k: int = 10) -> List[Dict]:
-    """Text-only BM25 search"""
-    search_body = {
-        "size": top_k,
-        "query": {
-            "match": {
-                "video_name": {
-                    "query": query_text,
-                    "fuzziness": "AUTO"
-                }
-            }
-        },
-        "_source": ["video_id", "video_path", "clip_id", "timestamp_start", 
-                   "timestamp_end", "clip_text",  "thumbnail_path", "video_name", "clip_duration"]
-    }
+# def text_search(client, query_text: str, top_k: int = 10) -> List[Dict]:
+#     """Text-only BM25 search"""
+#     search_body = {
+#         "size": top_k,
+#         "query": {
+#             "match": {
+#                 "video_name": {
+#                     "query": query_text,
+#                     "fuzziness": "AUTO"
+#                 }
+#             }
+#         },
+#         "_source": ["video_id", "video_path", "clip_id", "timestamp_start", 
+#                    "timestamp_end", "clip_text",  "thumbnail_path", "video_name", "clip_duration", "video_duration_sec"]
+#     }
     
-    response = client.search(index=INDEX_NAME, body=search_body)
-    return parse_search_results(response)
+#     response = client.search(index=INDEX_NAME, body=search_body)
+#     return parse_search_results(response)
 
 
-def visual_search(client, query_embedding: List[float], top_k: int = 10) -> List[Dict]:
+def visual_search(client, query_embedding: List[float], top_k: int = 10, INDEX_NAME: str = 'video_clips_consolidated') -> List[Dict]:
     """Visual-only k-NN search on visual-text embeddings"""
     search_body = {
         "size": top_k,
@@ -583,14 +919,14 @@ def visual_search(client, query_embedding: List[float], top_k: int = 10) -> List
             }
         },
         "_source": ["video_id", "video_path", "clip_id", "timestamp_start", 
-                   "timestamp_end", "clip_text", "thumbnail_path", "video_name", "clip_duration"]
+                   "timestamp_end", "clip_text", "thumbnail_path", "video_name", "clip_duration", "video_duration_sec"]
     }
     
     response = client.search(index=INDEX_NAME, body=search_body)
     return parse_search_results(response)
 
 
-def audio_search(client, query_embedding: List[float], top_k: int = 10) -> List[Dict]:
+def audio_search(client, query_embedding: List[float], top_k: int = 10,  INDEX_NAME: str = 'video_clips_consolidated') -> List[Dict]:
     """Audio-only k-NN search on audio embeddings"""
     search_body = {
         "size": top_k,
@@ -603,11 +939,309 @@ def audio_search(client, query_embedding: List[float], top_k: int = 10) -> List[
             }
         },
         "_source": ["video_id", "video_path", "clip_id", "timestamp_start", 
-                   "timestamp_end", "clip_text", "thumbnail_path", "video_name", "clip_duration"]
+                   "timestamp_end", "clip_text", "thumbnail_path", "video_name", "clip_duration", "video_duration_sec"]
     }
     
     response = client.search(index=INDEX_NAME, body=search_body)
     return parse_search_results(response)
+
+
+# ============ NEW SEARCH FUNCTIONS FOR MARENGO 3 (emb_visual, emb_audio, emb_transcription) ============
+
+def vector_search_marengo3(client, query_embedding: List[float], top_k: int = 10, INDEX_NAME: str = 'video_clips_3') -> List[Dict]:
+    """Vector search combining visual, audio, and transcription embeddings (Marengo 3)"""
+    search_body = {
+        "size": TOP_K,
+        "query": {
+            "hybrid": {
+                "queries": [
+                    # Visual embedding (k-NN) - weight 0.5
+                    {
+                        "knn": {
+                            "emb_visual": {
+                                "vector": query_embedding,
+                                "min_score": INNER_MIN_SCORE_VISUAL
+                            }
+                        }
+                    },
+                    # Audio embedding (k-NN) - weight 0.3
+                    {
+                        "knn": {
+                            "emb_audio": {
+                                "vector": query_embedding,
+                                "min_score": INNER_MIN_SCORE_AUDIO
+                            }
+                        }
+                    },
+                    # Transcription embedding (k-NN) - weight 0.2
+                    {
+                        "knn": {
+                            "emb_transcription": {
+                                "vector": query_embedding,
+                                "min_score": INNER_MIN_SCORE_TRANSCRIPTION
+                            }
+                        }
+                    }
+                ]
+            }
+        },
+        "_source": ["video_id", "video_path", "clip_id", "timestamp_start", 
+                   "timestamp_end", "clip_text", "thumbnail_path", "video_name", "clip_duration", "video_duration_sec"]
+    }
+    
+    if vector_pipeline_exists:
+        search_params = {
+            "index": INDEX_NAME,
+            "body": search_body,
+            "search_pipeline": VECTOR_PIPELINE
+        }
+    else:
+        search_params = {
+            "index": INDEX_NAME,
+            "body": search_body
+        }
+    
+    try:
+        response = client.search(**search_params)
+        logger.info(f"✓ Vector search (Marengo 3) completed, found {len(response.get('hits', {}).get('hits', []))} results")
+        return parse_search_results_vector(response)
+    except Exception as e:
+        logger.error(f"Vector search (Marengo 3) error: {e}", exc_info=True)
+        return []
+
+
+def visual_search_marengo3(client, query_embedding: List[float], top_k: int = 10, INDEX_NAME: str = 'video_clips_3') -> List[Dict]:
+    """Visual-only k-NN search on visual embeddings (Marengo 3)"""
+    search_body = {
+        "size": TOP_K,
+        "query": {
+            "knn": {
+                "emb_visual": {
+                    "vector": query_embedding,
+                    "min_score": 0.4
+                }
+            }
+        },
+        "_source": ["video_id", "video_path", "clip_id", "timestamp_start", 
+                   "timestamp_end", "clip_text", "thumbnail_path", "video_name", "clip_duration", "video_duration_sec"]
+    }
+    
+    try:
+        response = client.search(index=INDEX_NAME, body=search_body)
+        logger.info(f"✓ Visual search (Marengo 3) completed, found {len(response.get('hits', {}).get('hits', []))} results")
+        return parse_search_results(response)
+    except Exception as e:
+        logger.error(f"Visual search (Marengo 3) error: {e}", exc_info=True)
+        return []
+
+
+def audio_search_marengo3(client, query_embedding: List[float], top_k: int = 10, INDEX_NAME: str = 'video_clips_3') -> List[Dict]:
+    """Audio-only k-NN search on audio embeddings (Marengo 3)"""
+    search_body = {
+        "size": TOP_K,
+        "query": {
+            "knn": {
+                "emb_audio": {
+                    "vector": query_embedding,
+                    "min_score": 0.4
+                }
+            }
+        },
+        "_source": ["video_id", "video_path", "clip_id", "timestamp_start", 
+                   "timestamp_end", "clip_text", "thumbnail_path", "video_name", "clip_duration", "video_duration_sec"]
+    }
+    
+    try:
+        response = client.search(index=INDEX_NAME, body=search_body)
+        logger.info(f"✓ Audio search (Marengo 3) completed, found {len(response.get('hits', {}).get('hits', []))} results")
+        return parse_search_results(response)
+    except Exception as e:
+        logger.error(f"Audio search (Marengo 3) error: {e}", exc_info=True)
+        return []
+
+
+def transcription_search_marengo3(client, query_embedding: List[float], top_k: int = 10, INDEX_NAME: str = 'video_clips_3') -> List[Dict]:
+    """Transcription-only k-NN search on transcription embeddings (Marengo 3)"""
+    search_body = {
+        "size": TOP_K,
+        "query": {
+            "knn": {
+                "emb_transcription": {
+                    "vector": query_embedding,
+                    "min_score": 0.4
+                }
+            }
+        },
+        "_source": ["video_id", "video_path", "clip_id", "timestamp_start", 
+                   "timestamp_end", "clip_text", "thumbnail_path", "video_name", "clip_duration", "video_duration_sec"]
+    }
+    
+    try:
+        response = client.search(index=INDEX_NAME, body=search_body)
+        logger.info(f"✓ Transcription search (Marengo 3) completed, found {len(response.get('hits', {}).get('hits', []))} results")
+        return parse_search_results(response)
+    except Exception as e:
+        logger.error(f"Transcription search (Marengo 3) error: {e}", exc_info=True)
+        return []
+
+
+def vector_search_visual_audio_marengo3(client, query_embedding: List[float], top_k: int = 10, INDEX_NAME: str = 'video_clips_3') -> List[Dict]:
+    """Vector search combining visual and audio embeddings (Marengo 3)"""
+    search_body = {
+        "size": TOP_K,
+        "query": {
+            "hybrid": {
+                "queries": [
+                    # Visual embedding (k-NN) - weight 0.6
+                    {
+                        "knn": {
+                            "emb_visual": {
+                                "vector": query_embedding,
+                                "min_score": INNER_MIN_SCORE_VISUAL
+                            }
+                        }
+                    },
+                    # Audio embedding (k-NN) - weight 0.4
+                    {
+                        "knn": {
+                            "emb_audio": {
+                                "vector": query_embedding,
+                                "min_score": INNER_MIN_SCORE_AUDIO
+                            }
+                        }
+                    }
+                ]
+            }
+        },
+        "_source": ["video_id", "video_path", "clip_id", "timestamp_start", 
+                   "timestamp_end", "clip_text", "thumbnail_path", "video_name", "clip_duration", "video_duration_sec"]
+    }
+    
+    if vector_pipeline_exists:
+        search_params = {
+            "index": INDEX_NAME,
+            "body": search_body,
+            "search_pipeline": VECTOR_PIPELINE
+        }
+    else:
+        search_params = {
+            "index": INDEX_NAME,
+            "body": search_body
+        }
+    
+    try:
+        response = client.search(**search_params)
+        logger.info(f"✓ Vector search (visual+audio, Marengo 3) completed, found {len(response.get('hits', {}).get('hits', []))} results")
+        return parse_search_results_vector(response)
+    except Exception as e:
+        logger.error(f"Vector search (visual+audio, Marengo 3) error: {e}", exc_info=True)
+        return []
+
+
+def vector_search_visual_transcription_marengo3(client, query_embedding: List[float], top_k: int = 10, INDEX_NAME: str = 'video_clips_3') -> List[Dict]:
+    """Vector search combining visual and transcription embeddings (Marengo 3)"""
+    search_body = {
+        "size": TOP_K,
+        "query": {
+            "hybrid": {
+                "queries": [
+                    # Visual embedding (k-NN) - weight 0.6
+                    {
+                        "knn": {
+                            "emb_visual": {
+                                "vector": query_embedding,
+                                "min_score": INNER_MIN_SCORE_VISUAL
+                            }
+                        }
+                    },
+                    # Transcription embedding (k-NN) - weight 0.4
+                    {
+                        "knn": {
+                            "emb_transcription": {
+                                "vector": query_embedding,
+                                "min_score": INNER_MIN_SCORE_TRANSCRIPTION
+                            }
+                        }
+                    }
+                ]
+            }
+        },
+        "_source": ["video_id", "video_path", "clip_id", "timestamp_start", 
+                   "timestamp_end", "clip_text", "thumbnail_path", "video_name", "clip_duration", "video_duration_sec"]
+    }
+    
+    if vector_pipeline_exists:
+        search_params = {
+            "index": INDEX_NAME,
+            "body": search_body,
+            "search_pipeline": VECTOR_PIPELINE
+        }
+    else:
+        search_params = {
+            "index": INDEX_NAME,
+            "body": search_body
+        }
+    
+    try:
+        response = client.search(**search_params)
+        logger.info(f"✓ Vector search (visual+transcription, Marengo 3) completed, found {len(response.get('hits', {}).get('hits', []))} results")
+        return parse_search_results_vector(response)
+    except Exception as e:
+        logger.error(f"Vector search (visual+transcription, Marengo 3) error: {e}", exc_info=True)
+        return []
+
+
+def vector_search_audio_transcription_marengo3(client, query_embedding: List[float], top_k: int = 10, INDEX_NAME: str = 'video_clips_3') -> List[Dict]:
+    """Vector search combining audio and transcription embeddings (Marengo 3)"""
+    search_body = {
+        "size": TOP_K,
+        "query": {
+            "hybrid": {
+                "queries": [
+                    # Audio embedding (k-NN) - weight 0.5
+                    {
+                        "knn": {
+                            "emb_audio": {
+                                "vector": query_embedding,
+                                "min_score": INNER_MIN_SCORE_AUDIO
+                            }
+                        }
+                    },
+                    # Transcription embedding (k-NN) - weight 0.5
+                    {
+                        "knn": {
+                            "emb_transcription": {
+                                "vector": query_embedding,
+                                "min_score": INNER_MIN_SCORE_TRANSCRIPTION
+                            }
+                        }
+                    }
+                ]
+            }
+        },
+        "_source": ["video_id", "video_path", "clip_id", "timestamp_start", 
+                   "timestamp_end", "clip_text", "thumbnail_path", "video_name", "clip_duration", "video_duration_sec"]
+    }
+    
+    if vector_pipeline_exists:
+        search_params = {
+            "index": INDEX_NAME,
+            "body": search_body,
+            "search_pipeline": VECTOR_PIPELINE
+        }
+    else:
+        search_params = {
+            "index": INDEX_NAME,
+            "body": search_body
+        }
+    
+    try:
+        response = client.search(**search_params)
+        logger.info(f"✓ Vector search (audio+transcription, Marengo 3) completed, found {len(response.get('hits', {}).get('hits', []))} results")
+        return parse_search_results_vector(response)
+    except Exception as e:
+        logger.error(f"Vector search (audio+transcription, Marengo 3) error: {e}", exc_info=True)
+        return []
 
 
 def _create_hybrid_search_pipeline(client):
@@ -667,47 +1301,36 @@ def _create_vector_search_pipeline(client):
     #         }
     #     ]
     # }
-    # pipeline_body = {
-    #     "description": "Post processor for hybrid RRF search",
-    #     "phase_results_processors": [
-    #         {
-    #             "score-ranker-processor": {
-    #                 "combination": {
-    #                     "technique": "rrf",
-    #                     "rank_constant": 60
-    #                 }
-    #             }
-    #         }
-    #     ]
-    # }
+
     pipeline_body = {
-        "description": "Post-processing pipeline for vector search with min-max normalization (0-1 range)",
+        "description": "Post processor for hybrid RRF search",
         "phase_results_processors": [
             {
-                "normalization-processor": {
-                    "normalization": {
-                        "technique": "l2"
-                    },
-                    "combination": {  # ✅ REQUIRED
-                        "technique": "arithmetic_mean"
+                "score-ranker-processor": {
+                    "combination": {
+                        "technique": "rrf",
+                        "rank_constant": 60
                     }
                 }
             }
         ]
     }
+
     # pipeline_body = {
-    #         "description": "Normalization → RRF → final min-max normalization",
-    #         "phase_results_processors": [
-    #             {
-    #             "score-ranker-processor": {
+    #     "description": "Post-processing pipeline for vector search with min-max normalization (0-1 range)",
+    #     "phase_results_processors": [
+    #         {
+    #             "normalization-processor": {
+    #                 "normalization": {
+    #                     "technique": "l2"
+    #                 },
     #                 "combination": {
-    #                 "technique": "rrf",
-    #                 "rank_constant": 60
+    #                     "technique": "arithmetic_mean"
     #                 }
     #             }
-    #             }
-    #         ]
-    #     }
+    #         }
+    #     ]
+    # }
 
     
     try:

@@ -95,13 +95,13 @@ const VideoUpload = () => {
                     {file ? file.name : 'Click to select video'}
                   </p>
                   <p className="text-base text-gray-500">
-                    MP4, WebM, OGG, or MOV (max 500MB)
+                    Acceptable format: MP4 Only (max. 500MB)
                   </p>
                 </div>
                 <input
                   id="video-upload"
                   type="file"
-                  accept="video/*"
+                  accept="video/mp4"
                   onChange={handle_file_select}
                   className="hidden"
                 />

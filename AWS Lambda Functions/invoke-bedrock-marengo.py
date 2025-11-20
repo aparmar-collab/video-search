@@ -22,8 +22,9 @@ def lambda_handler(event, context):
             "s3Location": {
                 "uri": f"s3://{bucket}/{key}",
                 "bucketOwner": os.environ["AWS_BUCKET_OWNER"]
-            }
-        }
+                }
+            },
+        "embeddingOption": ["visual-text", "audio", "visual-image"]
     }
     
     # Start async model invocation job

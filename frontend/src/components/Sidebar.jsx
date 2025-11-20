@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, UploadCloud, PanelLeft, Grid, User } from 'lucide-react';
+import { Search, UploadCloud, PanelLeft, Grid, User, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const Sidebar = ({ activeTab, setActiveTab }) => {
@@ -118,6 +118,33 @@ const Sidebar = ({ activeTab, setActiveTab }) => {
                 className="text-sm font-medium whitespace-nowrap overflow-hidden"
               >
                 Upload
+              </motion.span>
+            )}
+          </AnimatePresence>
+        </button>
+
+        {/* Marengo 3 Search Button */}
+        <button
+          onClick={() => setActiveTab('search-3')}
+          className={`w-full flex items-center gap-3 p-3 transition-all ${
+            isExpanded ? 'rounded-lg' : 'rounded-full justify-center'
+          } ${
+            activeTab === 'search-3' 
+              ? 'bg-gradient-to-br from-purple-500 to-purple-600 text-white shadow-lg' 
+              : 'text-purple-600 hover:bg-purple-50'
+          }`}
+        >
+          <Sparkles className="w-6 h-6 flex-shrink-0" />
+          <AnimatePresence>
+            {isExpanded && (
+              <motion.span
+                initial={{ opacity: 0, width: 0 }}
+                animate={{ opacity: 1, width: 'auto' }}
+                exit={{ opacity: 0, width: 0 }}
+                transition={{ duration: 0.2 }}
+                className="text-sm font-medium whitespace-nowrap overflow-hidden"
+              >
+                Marengo 3
               </motion.span>
             )}
           </AnimatePresence>

@@ -4,7 +4,7 @@ import { formatTimestamp } from '../utils/formatTime';
 import { use_thumbnail } from '../hooks/useThumbnail';
 
 const VideoClipCard = ({ clip, onClick }) => {
-  const { video_id, video_path, timestamp_start, timestamp_end, clip_text, score, presigned_url, thumbnail_path } = clip;
+  const { video_id, video_path, timestamp_start, timestamp_end, clip_text, score, presigned_url, thumbnail_path, video_duration_sec } = clip;
 
   // Normalize score to 0-100 range
   const rawScore = typeof score === 'number' ? score : 0;
@@ -124,13 +124,30 @@ const VideoClipCard = ({ clip, onClick }) => {
         )}
 
         {/* Confidence indicator */}
-        <div className={`absolute top-2 right-2 px-3 py-1 rounded-full text-xs font-semibold text-white ${indicatorBg}`}>
+        <div className={`absolute top-2 right-24 px-3 py-1 rounded text-xs font-semibold text-white ${indicatorBg}`}>
           {confidenceLabel}
         </div>
         
+        {/* Timeline bar - floating above bottom */}
+        <div className="absolute bottom-2 left-0.5 right-0.5 h-1.5 bg-gray-400/50 rounded">
+          {/* Calculate clip position and width based on actual video duration or 6-minute default */}
+          {timestamp_start !== undefined && timestamp_end !== undefined && (
+            <>
+              {/* Clip duration highlight */}
+              <div
+                className="absolute h-full bg-orange-600/80 rounded"
+                style={{
+                  left: `${(timestamp_start / (video_duration_sec || 360)) * 100}%`,
+                  width: `${((timestamp_end - timestamp_start) / (video_duration_sec || 360)) * 100}%`,
+                }}
+              />
+            </>
+          )}
+        </div>
+        
         {/* Timestamp overlay */}
-        <div className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
-          {formatTimestamp(timestamp_start)}
+        <div className="absolute top-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
+          {formatTimestamp(timestamp_start)} - {formatTimestamp(timestamp_end)}
         </div>
         </div>
       </div>

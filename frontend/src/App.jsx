@@ -5,7 +5,8 @@ import ResultsGrid from './components/ResultsGrid';
 import VideoPlayer from './components/VideoPlayer';
 import VideoUpload from './components/VideoUpload';
 import VideoExplore from './components/VideoExplore';
-import { searchClips } from './services/api';
+import SearchMarengo3 from './components/SearchMarengo3';
+import { searchClips, searchClipsWithImage } from './services/api';
 import { AlertCircle, Search } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -19,17 +20,33 @@ function App() {
   const [selectedClip, setSelectedClip] = useState(null);
   const [hasSearched, setHasSearched] = useState(false); // Track if user has searched
 
-  const handle_search = async (searchQuery, searchType, topK = 20) => {
+  const handle_search = async (searchQuery, searchType, topK = 20, imageResponse = null, imageFile = null) => {
     setIsLoading(true);
     setError(null);
-    setQuery(searchQuery);
+    setQuery(searchQuery || '');
     setHasSearched(true); // Mark that a search has been performed
 
     try {
-      console.log("Sending req. to API with", searchQuery, searchType, topK)
-      const response = await searchClips(searchQuery, topK, searchType);
-      setClips(response.clips);
-      setTotal(response.total);
+      // If imageResponse is provided (from image search), use it directly
+      if (imageResponse) {
+        console.log("Using image search response");
+        setClips(imageResponse.clips);
+        setTotal(imageResponse.total);
+      } 
+      // If imageFile is provided, perform image search
+      else if (imageFile) {
+        console.log("Performing image search with file:", imageFile.name);
+        const response = await searchClipsWithImage(imageFile, topK, searchType);
+        setClips(response.clips);
+        setTotal(response.total);
+      } 
+      // Otherwise perform text search
+      else {
+        console.log("Sending req. to API with", searchQuery, searchType, topK)
+        const response = await searchClips(searchQuery, topK, searchType);
+        setClips(response.clips);
+        setTotal(response.total);
+      }
     } catch (err) {
       setError('Failed to search videos. Please try again.');
       console.error('Search error:', err);
@@ -57,6 +74,8 @@ function App() {
           <VideoUpload />
         ) : currentPage === 'explore' ? (
           <VideoExplore />
+        ) : currentPage === 'search-3' ? (
+          <SearchMarengo3 />
         ) : (
           <div className="w-full h-full flex flex-col">
             {/* Centered Search (Initial State) or Top Search (After Search) */}

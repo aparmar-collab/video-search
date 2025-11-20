@@ -11,9 +11,9 @@ load_dotenv()
 
 # Constants
 INDEX_NAME = "video_clips_consolidated"
-VIDEO_ID_TO_UPDATE = "your-video-id-here"  # Replace with actual video_id
-COLUMN_TO_UPDATE = "clip_text"  # Replace with column name to update
-NEW_VALUE = "new value here"  # Replace with new value
+VIDEO_ID_TO_UPDATE = "c96034b6-eaae-4561-ae41-ab6c72fa326c"  # Replace with actual video_id
+COLUMN_TO_UPDATE = "video_duration_sec"  # Replace with column name to update
+NEW_VALUE = "30"  # Replace with new value
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
