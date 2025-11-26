@@ -1,3 +1,4 @@
+import VideoClipCardMarengo3 from './VideoClipCardMarengo3';
 import VideoClipCard from './VideoClipCard';
 import { FileVideo } from 'lucide-react';
 
@@ -16,17 +17,21 @@ const ResultsGrid = ({ clips, total, query, onClipClick, from }) => {
     );
   }
 
+  // Use SearchResultCard for Marengo 3, VideoClipCard for others
+  const CardComponent = from === "Marengo 3" ? VideoClipCardMarengo3 : VideoClipCard;
+
   return (
     <div className="w-full">
       {/* Results grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
         {clips.map((clip, index) => (
           <div key={`${clip.video_id}-${clip.timestamp_start}-${index}`} className="flex justify-center">
-            <div className="w-full max-w-md">
-              <VideoClipCard
+            <div className="w-full max-w-lg">
+              <CardComponent
                 clip={clip}
                 onClick={onClipClick}
                 from={from}
+                index={index}
               />
             </div>
           </div>

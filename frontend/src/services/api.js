@@ -136,7 +136,7 @@ export const searchClipsMarengo3 = async (query = null, topK = 10, searchType = 
     }
 
     // Validate search type
-    const validSearchTypes = ['vector', 'visual', 'audio', 'transcription', 'vector_visual_audio', 'vector_audio_transcription', 'vector_visual_transcription'];
+    const validSearchTypes = ['vector', 'visual', 'audio', 'transcription', 'visual_audio', 'audio_transcription', 'visual_transcription'];
     if (!validSearchTypes.includes(searchType)) {
       throw new Error(`Invalid search type: ${searchType}. Supported types: ${validSearchTypes.join(', ')}`);
     }

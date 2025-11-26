@@ -30,9 +30,22 @@ const SearchBarMarengo3 = ({ onSearch, isLoading, onSearchTypeChange, queryValue
     if (!visual && audio && !transcription) return 'audio';
     if (!visual && !audio && transcription) return 'transcription';
     
-    // Any combination (including all three) → 'vector'
-    // Backend will use intent classification to determine modality focus
-    return 'vector'; // default for any multi-modality combination
+    // UPDATED: 7 search options - specific combinations instead of intent-based
+    // Two-modality combinations
+    if (visual && audio && !transcription) return 'visual_audio';
+    if (visual && !audio && transcription) return 'visual_transcription';
+    if (!visual && audio && transcription) return 'audio_transcription';
+    
+    // All three modalities → 'vector' (balanced search)
+    if (visual && audio && transcription) return 'vector';
+    
+    // COMMENTED OUT: Old intent-based logic
+    // // Any combination (including all three) → 'vector'
+    // // Backend will use intent classification to determine modality focus
+    // return 'vector'; // default for any multi-modality combination
+    
+    // Default fallback (if none selected, use vector)
+    return 'vector';
   };
 
   const handle_submit = async (e) => {

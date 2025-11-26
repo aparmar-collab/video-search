@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import SearchBarMarengo3 from './SearchBarMarengo3';
 import ResultsGrid from './ResultsGrid';
-import VideoPlayer from './VideoPlayer';
+import VideoPlayerMarengo3 from './VideoPlayerMarengo3';
 import { searchClipsMarengo3 } from '../services/api';
 import { AlertCircle, Search } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -169,7 +169,7 @@ function SearchMarengo3() {
 
           {/* Results */}
           {!isLoading && clips.length > 0 && (
-            <div className="w-full max-w-7xl mx-auto">
+            <div className="w-full max-w-8xl mx-auto">
               <ResultsGrid
                 clips={clips}
                 total={total}
@@ -199,7 +199,12 @@ function SearchMarengo3() {
 
       {/* Video Player Modal */}
       {selectedClip && (
-        <VideoPlayer clip={selectedClip} onClose={close_player} />
+        <VideoPlayerMarengo3 
+          clip={selectedClip} 
+          allClips={clips}
+          onClose={close_player} 
+          onClipSelect={setSelectedClip}
+        />
       )}
     </div>
   );
