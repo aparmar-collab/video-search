@@ -10,13 +10,30 @@ def lambda_handler(event, context):
     bucket = event['bucket']
     key = event['key']
     part = event['part']
+    MARENGO_MODEL_VERSION = 3
 
     print(f"Processing {key} in bucket {bucket}")
     
     dst_bucket = 'condenast-processed-useast1-943143228843-dev'
-    
-    
-    request_body = {
+
+    if MARENGO_MODEL_VERSION == 3:
+        modelId = 'twelvelabs.marengo-embed-3-0-v1:0'
+        request_body = {
+        "inputType": "video",
+        "video": {
+        "mediaSource": {
+            "s3Location": {
+                "uri": f"s3://{bucket}/{key}",
+                "bucketOwner": os.environ["AWS_BUCKET_OWNER"]
+                }
+            },
+        "embeddingOption": ["visual", "audio", "transcription"],
+        "embeddingScope": ["clip"]
+        }
+    }
+    else:
+        modelId = "twelvelabs.marengo-embed-2-7-v1:0"
+        request_body = {
         "inputType": "video",
         "mediaSource": {
             "s3Location": {
@@ -27,13 +44,18 @@ def lambda_handler(event, context):
         "embeddingOption": ["visual-text", "audio", "visual-image"]
     }
     
+    if MARENGO_MODEL_VERSION == 3:
+        outputS3uri = f"s3://{dst_bucket}/embeddings-marengo-3/{key}/"
+    else:
+        outputS3uri = f"s3://{dst_bucket}/embeddings/{key}/"    
+    
     # Start async model invocation job
     response = bedrock_runtime.start_async_invoke(
-        modelId='twelvelabs.marengo-embed-2-7-v1:0',
+        modelId=modelId,
         modelInput=request_body,
         outputDataConfig={
             "s3OutputDataConfig": {
-                "s3Uri": f"s3://{dst_bucket}/embeddings/{key}/"
+                "s3Uri": outputS3uri
             }
         }
     )
@@ -44,5 +66,5 @@ def lambda_handler(event, context):
         'jobId': response['invocationArn'],
         'invocationArn': response['invocationArn'],
         'part': part,
-        'outputS3Uri': f"s3://{dst_bucket}/{key}/embeddings/"
+        'outputS3Uri': outputS3uri
     }

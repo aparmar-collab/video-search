@@ -46,7 +46,7 @@ def lambda_handler(event, context):
         try:
             response = sfn_client.start_execution(
                 stateMachineArn=STATE_MACHINE_ARN,
-                name=f"video-process-{key.replace('/', '-').replace('.', '-').replace(' ', '-')}-{timestamp}",
+                name=f"video-process-{key.replace('/', '-').replace('.', '-').replace(' ', '-')[:28]}-{timestamp}",
                 input=json.dumps(sfn_input)
             )
             

@@ -55,6 +55,8 @@ def lambda_handler(event, context):
         region = "us-east-1"
         service = "es"
 
+        function = event.get("function", "register-snapshot-repo")
+
         domain = os.getenv(
             "OPENSEARCH_CLUSTER_HOST",
             "https://search-condenast-aos-domain-3hmon7me6ct3p5e46snecxe6f4.us-east-1.es.amazonaws.com"
@@ -104,6 +106,15 @@ def lambda_handler(event, context):
                     "error": "Repo registration failed",
                     "details": r.text,
                     "status_code": r.status_code
+                })
+            }
+
+        if function == "register-snapshot-repo":
+            return {
+                "statusCode": 200,
+                "body": json.dumps({
+                    "message": "Repository registered successfully",
+                    "repo_name": repo_name
                 })
             }
 
