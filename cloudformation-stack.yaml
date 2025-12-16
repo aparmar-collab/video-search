@@ -14,6 +14,12 @@ Description: |
     * s3://condenast-fe/lambda-artifacts/ffmpeg-video-processing-dependencies-697fac5e-fb3f-4814-b610-f0d2d3812616.zip
 
 Parameters:
+  StackPrefix:
+    Type: String
+    Default: 'video-search-v1'
+    Description: 'Prefix for all resource names to avoid collisions'
+    AllowedPattern: '[a-zA-Z0-9-]+'
+    MaxLength: 20
   AccountId:
     Type: String
     Default: '943143228843'
@@ -25,7 +31,7 @@ Resources:
   ECSTaskExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: condenast-ecs-task-execution-role
+      RoleName: !Sub '${StackPrefix}-ecs-task-execution-role'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -55,13 +61,13 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource:
-                  - arn:aws:logs:us-east-1:943143228843:log-group:/ecs/video-preprocessing:*
-                  - arn:aws:logs:us-east-1:943143228843:log-group:/ecs/search-similar-videos-task:*
+                  - !Sub 'arn:aws:logs:us-east-1:943143228843:log-group:/ecs/${StackPrefix}-video-preprocessing:*'
+                  - !Sub 'arn:aws:logs:us-east-1:943143228843:log-group:/ecs/${StackPrefix}-search-similar-videos-task:*'
 
   ECSTaskRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: condenast-ecs-task-role
+      RoleName: !Sub '${StackPrefix}-ecs-task-role'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -101,7 +107,7 @@ Resources:
   SearchSimilarVideosTaskRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: condenast-search-similar-videos-ecs-task-role
+      RoleName: !Sub '${StackPrefix}-search-similar-videos-ecs-task-role'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -123,8 +129,7 @@ Resources:
                   - es:ESHttpDelete
                   - es:ESHttpHead
                 Resource:
-                  - arn:aws:es:us-east-1:943143228843:domain/condenast-cluster/*
-                  - arn:aws:es:us-east-1:943143228843:domain/condenast-aos-domain/*
+                  - !Sub 'arn:aws:es:${Region}:${AccountId}:domain/${StackPrefix}-aos-domain/*'
         - PolicyName: BedrockInvokeModel
           PolicyDocument:
             Version: '2012-10-17'
@@ -180,7 +185,7 @@ Resources:
   InvokeBedrockMarengoRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: condenast-invoke-bedrock-marengo-role
+      RoleName: !Sub '${StackPrefix}-invoke-bedrock-marengo-role'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -189,7 +194,7 @@ Resources:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionPolicy
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
       Policies:
         - PolicyName: CloudWatchLogs
           PolicyDocument:
@@ -202,7 +207,7 @@ Resources:
                 Action:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
-                Resource: arn:aws:logs:us-east-1:943143228843:log-group:/aws/lambda/condenast-invoke-bedrock-marengo:*
+                Resource: !Sub 'arn:aws:logs:us-east-1:943143228843:log-group:/aws/lambda/${StackPrefix}-invoke-bedrock-marengo:*'
         - PolicyName: S3Access
           PolicyDocument:
             Version: '2012-10-17'
@@ -243,7 +248,7 @@ Resources:
                   - arn:aws:bedrock:us-east-1:943143228843:model-invocation-job/*
               - Effect: Allow
                 Action: iam:PassRole
-                Resource: !Sub 'arn:aws:iam::${AccountId}:role/condenast-invoke-bedrock-marengo-role'
+                Resource: !Sub 'arn:aws:iam::${AccountId}:role/${StackPrefix}-invoke-bedrock-marengo-role'
                 Condition:
                   StringEquals:
                     iam:PassedToService: bedrock.amazonaws.com
@@ -256,7 +261,7 @@ Resources:
   InvokeVideoProcessingStepFunctionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: condenast-invoke-video-processing-step-function-role
+      RoleName: !Sub '${StackPrefix}-invoke-video-processing-step-function-role'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -265,7 +270,7 @@ Resources:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionPolicy
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
       Policies:
         - PolicyName: CloudWatchLogs
           PolicyDocument:
@@ -278,19 +283,19 @@ Resources:
                 Action:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
-                Resource: arn:aws:logs:us-east-1:943143228843:log-group:/aws/lambda/condenast-invoke-video-processing-step-function:*
+                Resource: !Sub 'arn:aws:logs:us-east-1:943143228843:log-group:/aws/lambda/${StackPrefix}-invoke-video-processing-step-function:*'
         - PolicyName: StepFunctionsAccess
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action: states:StartExecution
-                Resource: !Sub 'arn:aws:states:${Region}:${AccountId}:stateMachine:condenast-video-processing-pipeline'
+                Resource: !Sub 'arn:aws:states:${Region}:${AccountId}:stateMachine:${StackPrefix}-pipeline'
 
   OpenSearchSnapshotRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: condenast-opensearch-snapshot-role
+      RoleName: !Sub '${StackPrefix}-opensearch-snapshot-role'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -319,7 +324,7 @@ Resources:
   CreateSnapshotLambdaRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: condenast-create-opensearch-snapshot-lambda-role
+      RoleName: !Sub '${StackPrefix}-create-opensearch-snapshot-lambda-role'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -328,7 +333,7 @@ Resources:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionPolicy
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
       Policies:
         - PolicyName: CloudWatchLogs
           PolicyDocument:
@@ -341,7 +346,7 @@ Resources:
                 Action:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
-                Resource: arn:aws:logs:us-east-1:943143228843:log-group:/aws/lambda/condenast-opensearch-snapshot:*
+                Resource: !Sub 'arn:aws:logs:us-east-1:943143228843:log-group:/aws/lambda/${StackPrefix}-create-opensearch-snapshot:*'
         - PolicyName: OpenSearchAccess
           PolicyDocument:
             Version: '2012-10-17'
@@ -350,7 +355,7 @@ Resources:
                 Action:
                   - es:ESHttpPut
                   - es:ESHttpGet
-                Resource: arn:aws:es:us-east-1:943143228843:domain/condenast-aos-domain/*
+                Resource: !Sub 'arn:aws:es:${Region}:${AccountId}:domain/${StackPrefix}-aos-domain/*'
               - Effect: Allow
                 Action: iam:PassRole
                 Resource: !GetAtt OpenSearchSnapshotRole.Arn
@@ -358,7 +363,7 @@ Resources:
   StoreEmbeddingsLambdaRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: condenast-store-embeddings-opensearch-lambda-role
+      RoleName: !Sub '${StackPrefix}-store-embeddings-opensearch-lambda-role'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -367,7 +372,7 @@ Resources:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionPolicy
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
       Policies:
         - PolicyName: CloudWatchLogs
           PolicyDocument:
@@ -380,7 +385,7 @@ Resources:
                 Action:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
-                Resource: arn:aws:logs:us-east-1:943143228843:log-group:/aws/lambda/condenast-store-embeddings-opensearch:*
+                Resource: !Sub 'arn:aws:logs:us-east-1:943143228843:log-group:/aws/lambda/${StackPrefix}-store-embeddings-opensearch:*'
         - PolicyName: S3Access
           PolicyDocument:
             Version: '2012-10-17'
@@ -417,8 +422,7 @@ Resources:
                   - es:ESHttpDelete
                   - es:ESHttpHead
                 Resource:
-                  - arn:aws:es:us-east-1:943143228843:domain/condenast-cluster/*
-                  - arn:aws:es:us-east-1:943143228843:domain/condenast-aos-domain/*
+                  - !Sub 'arn:aws:es:${Region}:${AccountId}:domain/${StackPrefix}-aos-domain/*'
         - PolicyName: AOSSAccess
           PolicyDocument:
             Version: '2012-10-17'
@@ -433,7 +437,7 @@ Resources:
   StepFunctionsExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: condenast-complete-video-processing-pipeline-role
+      RoleName: !Sub '${StackPrefix}-complete-video-processing-pipeline-role'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -467,8 +471,8 @@ Resources:
               - Effect: Allow
                 Action: lambda:InvokeFunction
                 Resource:
-                  - arn:aws:lambda:us-east-1:943143228843:function:condenast-invoke-bedrock-marengo
-                  - arn:aws:lambda:us-east-1:943143228843:function:condenast-store-embeddings-opensearch
+                  - !Sub 'arn:aws:lambda:us-east-1:943143228843:function:${StackPrefix}-invoke-bedrock-marengo'
+                  - !Sub 'arn:aws:lambda:us-east-1:943143228843:function:${StackPrefix}-store-embeddings-opensearch'
         - PolicyName: ECSRunTask
           PolicyDocument:
             Version: '2012-10-17'
@@ -676,31 +680,7 @@ Resources:
         - Key: Name
           Value: condenast-ecs-sg
 
-  OpenSearchSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security group for OpenSearch
-      VpcId: !Ref VPC
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          SourceSecurityGroupId: !Ref ECSSecurityGroup
-      SecurityGroupEgress:
-        - IpProtocol: "-1"
-          CidrIp: 0.0.0.0/0
-      Tags:
-        - Key: Name
-          Value: condenast-opensearch-sg
 
-  OpenSearchSecurityGroupSelfIngress:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: !Ref OpenSearchSecurityGroup
-      IpProtocol: tcp
-      FromPort: 443
-      ToPort: 443
-      SourceSecurityGroupId: !Ref OpenSearchSecurityGroup
 
   LambdaSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -714,14 +694,28 @@ Resources:
         - Key: Name
           Value: condenast-lambda-sg
 
-  OpenSearchSecurityGroupLambdaIngress:
-    Type: AWS::EC2::SecurityGroupIngress
+  VPCEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupId: !Ref OpenSearchSecurityGroup
-      IpProtocol: tcp
-      FromPort: 443
-      ToPort: 443
-      SourceSecurityGroupId: !Ref LambdaSecurityGroup
+      GroupDescription: Security group for VPC endpoints
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref ECSSecurityGroup
+          Description: Allow HTTPS from ECS tasks
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref LambdaSecurityGroup
+          Description: Allow HTTPS from Lambda functions
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: condenast-vpc-endpoint-sg
 
   S3VPCEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -741,8 +735,7 @@ Resources:
         - !Ref PrivateSubnet1
         - !Ref PrivateSubnet2
       SecurityGroupIds:
-        - !Ref LambdaSecurityGroup
-        - !Ref ECSSecurityGroup
+        - !Ref VPCEndpointSecurityGroup
       PrivateDnsEnabled: true
 
   ECRDKRVPCEndpoint:
@@ -755,8 +748,7 @@ Resources:
         - !Ref PrivateSubnet1
         - !Ref PrivateSubnet2
       SecurityGroupIds:
-        - !Ref LambdaSecurityGroup
-        - !Ref ECSSecurityGroup
+        - !Ref VPCEndpointSecurityGroup
       PrivateDnsEnabled: true
 
   BedrockVPCEndpoint:
@@ -769,7 +761,7 @@ Resources:
         - !Ref PrivateSubnet1
         - !Ref PrivateSubnet2
       SecurityGroupIds:
-        - !Ref LambdaSecurityGroup
+        - !Ref VPCEndpointSecurityGroup
       PrivateDnsEnabled: true
 
   BedrockRuntimeVPCEndpoint:
@@ -782,7 +774,7 @@ Resources:
         - !Ref PrivateSubnet1
         - !Ref PrivateSubnet2
       SecurityGroupIds:
-        - !Ref LambdaSecurityGroup
+        - !Ref VPCEndpointSecurityGroup
       PrivateDnsEnabled: true
 
   StepFunctionsVPCEndpoint:
@@ -795,7 +787,7 @@ Resources:
         - !Ref PrivateSubnet1
         - !Ref PrivateSubnet2
       SecurityGroupIds:
-        - !Ref ECSSecurityGroup
+        - !Ref VPCEndpointSecurityGroup
       PrivateDnsEnabled: true
 
   STSVPCEndpoint:
@@ -808,50 +800,13 @@ Resources:
         - !Ref PrivateSubnet1
         - !Ref PrivateSubnet2
       SecurityGroupIds:
-        - !Ref LambdaSecurityGroup
-        - !Ref ECSSecurityGroup
+        - !Ref VPCEndpointSecurityGroup
       PrivateDnsEnabled: true
-
-  VideoPreprocessingLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: /ecs/video-preprocessing
-      RetentionInDays: 31
-
-  SearchSimilarVideosLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: /ecs/search-similar-videos-task
-      RetentionInDays: 31
-
-  InvokeBedrockMarengoLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: /aws/lambda/condenast-invoke-bedrock-marengo
-      RetentionInDays: 31
-
-  StoreEmbeddingsLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: /aws/lambda/condenast-store-embeddings-opensearch
-      RetentionInDays: 31
-
-  InvokeStepFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: /aws/lambda/condenast-invoke-video-processing-step-function
-      RetentionInDays: 31
-
-  CreateSnapshotLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: /aws/lambda/condenast-create-opensearch-snapshot
-      RetentionInDays: 31
 
   OpenSearchAdminRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: condenast-opensearch-admin
+      RoleName: !Sub '${StackPrefix}-opensearch-admin'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -863,25 +818,17 @@ Resources:
   OpenSearchDomain:
     Type: AWS::OpenSearchService::Domain
     Properties:
-      DomainName: condenast-aos-domain
+      DomainName: !Sub '${StackPrefix}-aos-domain'
       EngineVersion: OpenSearch_3.3
       ClusterConfig:
-        InstanceType: t3.small.search
-        InstanceCount: 2
+        InstanceType: r8g.large.search
+        InstanceCount: 1
         DedicatedMasterEnabled: false
-        ZoneAwarenessEnabled: true
-        ZoneAwarenessConfig:
-          AvailabilityZoneCount: 2
+        ZoneAwarenessEnabled: false
       EBSOptions:
         EBSEnabled: true
         VolumeType: gp3
         VolumeSize: 10
-      VPCOptions:
-        SubnetIds:
-          - !Ref PrivateSubnet1
-          - !Ref PrivateSubnet2
-        SecurityGroupIds:
-          - !Ref OpenSearchSecurityGroup
       EncryptionAtRestOptions:
         Enabled: true
       NodeToNodeEncryptionOptions:
@@ -907,12 +854,14 @@ Resources:
               - es:ESHttpGet
               - es:ESHttpPost
               - es:ESHttpPut
-            Resource: !Sub 'arn:aws:es:${Region}:${AccountId}:domain/condenast-aos-domain/*'
+              - es:ESHttpDelete
+              - es:ESHttpHead
+            Resource: !Sub 'arn:aws:es:${Region}:${AccountId}:domain/${StackPrefix}-aos-domain/*'
 
   ECSCluster:
     Type: AWS::ECS::Cluster
     Properties:
-      ClusterName: condenast-search-similar-videos-cluster
+      ClusterName: !Sub '${StackPrefix}-cluster'
       ClusterSettings:
         - Name: containerInsights
           Value: enabled
@@ -920,31 +869,35 @@ Resources:
   VideoPreprocessingTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
-      Family: video-preprocessing-task
+      Family: !Sub '${StackPrefix}-video-preprocessing-task'
       RequiresCompatibilities:
         - FARGATE
       NetworkMode: awsvpc
-      Cpu: '2048'
-      Memory: '4096'
+      Cpu: '1024'
+      Memory: '2048'
       ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
       TaskRoleArn: !GetAtt ECSTaskRole.Arn
       ContainerDefinitions:
-        - Name: video-preprocessor
+        - Name: !Sub '${StackPrefix}-video-preprocessor'
           Image: !Sub '${AccountId}.dkr.ecr.${Region}.amazonaws.com/video-preprocessing:latest'
           Essential: true
           LogConfiguration:
             LogDriver: awslogs
             Options:
-              awslogs-group: /ecs/video-preprocessing
+              awslogs-group: !Sub '/ecs/${StackPrefix}-video-preprocessing'
               awslogs-region: !Ref Region
               awslogs-stream-prefix: ecs
               awslogs-create-group: 'true'
 
   SearchSimilarVideosTaskDefinition:
     Type: AWS::ECS::TaskDefinition
-    DependsOn: OpenSearchDomain
+    DependsOn:
+      - OpenSearchDomain
+      - ECRAPIVPCEndpoint
+      - ECRDKRVPCEndpoint
+      - S3VPCEndpoint
     Properties:
-      Family: search-similar-videos-task
+      Family: !Sub '${StackPrefix}-search-similar-videos-task'
       RequiresCompatibilities:
         - FARGATE
       NetworkMode: awsvpc
@@ -956,7 +909,7 @@ Resources:
         CpuArchitecture: X86_64
         OperatingSystemFamily: LINUX
       ContainerDefinitions:
-        - Name: search-similar-videos-container
+        - Name: !Sub '${StackPrefix}-search-similar-videos-container'
           Image: !Sub '${AccountId}.dkr.ecr.${Region}.amazonaws.com/condenast/search-similar-videos:latest'
           Essential: true
           PortMappings:
@@ -976,7 +929,7 @@ Resources:
           LogConfiguration:
             LogDriver: awslogs
             Options:
-              awslogs-group: /ecs/search-similar-videos-task
+              awslogs-group: !Sub '/ecs/${StackPrefix}-search-similar-videos-task'
               awslogs-region: !Ref Region
               awslogs-stream-prefix: ecs
               awslogs-create-group: 'true'
@@ -984,7 +937,7 @@ Resources:
   ApplicationLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Name: condenast-search-alb
+      Name: !Sub '${StackPrefix}-alb'
       Scheme: internet-facing
       Type: application
       Subnets:
@@ -996,7 +949,7 @@ Resources:
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Name: search-similar-videos-tg
+      Name: !Sub '${StackPrefix}-tg'
       Protocol: HTTP
       Port: 8000
       TargetType: ip
@@ -1022,10 +975,10 @@ Resources:
     Type: AWS::ECS::Service
     DependsOn: ALBListener
     Properties:
-      ServiceName: search-similar-videos-service
+      ServiceName: !Sub '${StackPrefix}-service'
       Cluster: !Ref ECSCluster
       TaskDefinition: !Ref SearchSimilarVideosTaskDefinition
-      DesiredCount: 2
+      DesiredCount: 1
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
@@ -1036,7 +989,7 @@ Resources:
             - !Ref ECSSecurityGroup
           AssignPublicIp: DISABLED
       LoadBalancers:
-        - ContainerName: search-similar-videos-container
+        - ContainerName: !Sub '${StackPrefix}-search-similar-videos-container'
           ContainerPort: 8000
           TargetGroupArn: !Ref TargetGroup
       HealthCheckGracePeriodSeconds: 60
@@ -1044,8 +997,8 @@ Resources:
   AutoScalingTarget:
     Type: AWS::ApplicationAutoScaling::ScalableTarget
     Properties:
-      MaxCapacity: 10
-      MinCapacity: 2
+      MaxCapacity: 4
+      MinCapacity: 1
       ResourceId: !Sub 'service/${ECSCluster}/${ECSService.Name}'
       ScalableDimension: ecs:service:DesiredCount
       ServiceNamespace: ecs
@@ -1054,7 +1007,7 @@ Resources:
   AutoScalingPolicy:
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
     Properties:
-      PolicyName: search-similar-videos-scaling-policy
+      PolicyName: !Sub '${StackPrefix}-scaling-policy'
       PolicyType: TargetTrackingScaling
       ScalingTargetId: !Ref AutoScalingTarget
       TargetTrackingScalingPolicyConfiguration:
@@ -1068,7 +1021,7 @@ Resources:
   InvokeBedrockMarengoFunction:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: condenast-invoke-bedrock-marengo
+      FunctionName: !Sub '${StackPrefix}-invoke-bedrock-marengo'
       Runtime: python3.13
       Handler: index.lambda_handler
       Timeout: 300
@@ -1143,7 +1096,7 @@ Resources:
   OpenSearchDependenciesLayer:
     Type: AWS::Lambda::LayerVersion
     Properties:
-      LayerName: condenast-opensearch-dependencies
+      LayerName: !Sub '${StackPrefix}-opensearch-dependencies'
       CompatibleRuntimes:
         - python3.13
       Content:
@@ -1153,7 +1106,7 @@ Resources:
   FfmpegVideoProcessingDependenciesLayer:
     Type: AWS::Lambda::LayerVersion
     Properties:
-      LayerName: ffmpeg-video-processing-dependencies
+      LayerName: !Sub '${StackPrefix}-ffmpeg-video-processing-dependencies'
       CompatibleRuntimes:
         - python3.13
       Content:
@@ -1164,7 +1117,7 @@ Resources:
     Type: AWS::Lambda::Function
     DependsOn: OpenSearchDomain
     Properties:
-      FunctionName: condenast-store-embeddings-opensearch
+      FunctionName: !Sub '${StackPrefix}-store-embeddings-opensearch'
       Runtime: python3.13
       Handler: index.lambda_handler
       Timeout: 300
@@ -1284,7 +1237,7 @@ Resources:
   InvokeStepFunctionFunction:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: condenast-invoke-video-processing-step-function
+      FunctionName: !Sub '${StackPrefix}-invoke-video-processing-step-function'
       Runtime: python3.13
       Handler: index.lambda_handler
       Timeout: 60
@@ -1334,7 +1287,7 @@ Resources:
     Type: AWS::Lambda::Function
     DependsOn: OpenSearchDomain
     Properties:
-      FunctionName: condenast-create-opensearch-snapshot
+      FunctionName: !Sub '${StackPrefix}-create-opensearch-snapshot'
       Runtime: python3.12
       Handler: index.lambda_handler
       Timeout: 300
@@ -1345,7 +1298,7 @@ Resources:
           OPENSEARCH_CLUSTER_HOST: !Sub 'https://${OpenSearchDomain.DomainEndpoint}'
           SNAPSHOT_ROLE_ARN: !GetAtt OpenSearchSnapshotRole.Arn
           S3_BUCKET: condenast-fe
-          REPO_NAME: condenast-snapshot-repo
+          REPO_NAME: !Sub '${StackPrefix}-snapshot-repo'
           
       Layers:
         - arn:aws:lambda:us-east-1:770693421928:layer:Klayers-p312-requests:18
@@ -1447,7 +1400,7 @@ Resources:
       - InvokeBedrockMarengoFunction
       - StoreEmbeddingsFunction
     Properties:
-      StateMachineName: condenast-video-processing-pipeline
+      StateMachineName: !Sub '${StackPrefix}-pipeline'
       RoleArn: !GetAtt StepFunctionsExecutionRole.Arn
       DefinitionString: !Sub |
         {
@@ -1471,7 +1424,7 @@ Resources:
                 "Overrides": {
                   "ContainerOverrides": [
                     {
-                      "Name": "video-preprocessor",
+                      "Name": "${StackPrefix}-video-preprocessor",
                       "Environment": [
                         {"Name": "BUCKET_NAME", "Value.$": "$.detail.bucket.name"},
                         {"Name": "VIDEO_KEY", "Value.$": "$.detail.object.key"},
@@ -1594,157 +1547,149 @@ Resources:
           }
         }
 
-  OpenSearchRoleMappingLambdaRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: condenast-opensearch-role-mapping-lambda-role
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionPolicy
-      Policies:
-        - PolicyName: OpenSearchAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - es:ESHttpPut
-                  - es:ESHttpGet
-                  - es:ESHttpPost
-                Resource: !Sub 'arn:aws:es:${Region}:${AccountId}:domain/condenast-aos-domain/*'
+  # OpenSearchRoleMappingLambdaRole:
+  #   Type: AWS::IAM::Role
+  #   Properties:
+  #     RoleName: !Sub '${StackPrefix}-opensearch-role-mapping-lambda-role'
+  #     AssumeRolePolicyDocument:
+  #       Version: '2012-10-17'
+  #       Statement:
+  #         - Effect: Allow
+  #           Principal:
+  #             Service: lambda.amazonaws.com
+  #           Action: sts:AssumeRole
+  #     ManagedPolicyArns:
+  #       - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+  #     Policies:
+  #       - PolicyName: OpenSearchAccess
+  #         PolicyDocument:
+  #           Version: '2012-10-17'
+  #           Statement:
+  #             - Effect: Allow
+  #               Action:
+  #                 - es:ESHttpPut
+  #                 - es:ESHttpGet
+  #                 - es:ESHttpPost
+  #               Resource: !Sub 'arn:aws:es:${Region}:${AccountId}:domain/${StackPrefix}-aos-domain/*'
 
-  OpenSearchRoleMappingLambda:
-    Type: AWS::Lambda::Function
-    DependsOn: OpenSearchDomain
-    Properties:
-      FunctionName: condenast-opensearch-role-mapping
-      Runtime: python3.11
-      Handler: index.handler
-      Timeout: 300
-      MemorySize: 512
-      Role: !GetAtt OpenSearchRoleMappingLambdaRole.Arn
-      VpcConfig:
-        SubnetIds:
-          - !Ref PrivateSubnet1
-          - !Ref PrivateSubnet2
-        SecurityGroupIds:
-          - !Ref LambdaSecurityGroup
-      Code:
-        ZipFile: |
-          import json
-          import boto3
-          import urllib3
-          from botocore.awsrequest import AWSRequest
-          from botocore.auth import SigV4Auth
-          http = urllib3.PoolManager()
-          def send_cfn_response(event, context, status, data):
-              """Send response to CloudFormation custom resource"""
-              try:
-                  response_url = event['ResponseURL']
-                  response_body = {
-                      'Status': status,
-                      'PhysicalResourceId': event.get('PhysicalResourceId', event['LogicalResourceId']),
-                      'StackId': event['StackId'],
-                      'RequestId': event['RequestId'],
-                      'LogicalResourceId': event['LogicalResourceId'],
-                      'Data': data
-                  }
-                  headers = {'Content-Type': 'application/json'}
-                  http.request('PUT', response_url, body=json.dumps(response_body), headers=headers)
-                  print(f"CloudFormation response sent: {status}")
-              except Exception as e:
-                  print(f"Failed to send CloudFormation response: {str(e)}")
-          def signed_request(method, url, region, service, credentials, json_body=None):
-              body = json.dumps(json_body) if json_body else None
-              headers = {"Content-Type": "application/json"} if json_body else {}
-              aws_request = AWSRequest(method=method, url=url, data=body, headers=headers)
-              SigV4Auth(credentials, service, region).add_auth(aws_request)
-              return http.request(
-                  method,
-                  aws_request.url,
-                  body=aws_request.body,
-                  headers=dict(aws_request.headers)
-              )
-          def create_app_scoped_roles(domain_endpoint, region, service, credentials):
-              """Create least-privilege OpenSearch roles for ECS and Lambda"""
-              roles_to_create = {
-                  "ecs_app_role": {
-                      "cluster_permissions": [],
-                      "index_permissions": [
-                          {
-                              "index_patterns": ["video_*"],
-                              "allowed_actions": ["read", "write", "create_index", "manage"]
-                          }
-                      ]
-                  },
-                  "lambda_ingest_role": {
-                      "cluster_permissions": [],
-                      "index_permissions": [
-                          {
-                              "index_patterns": ["video_*"],
-                              "allowed_actions": ["write", "create_index", "manage"]
-                          }
-                      ]
-                  }
-              }
-              for role_name, role_def in roles_to_create.items():
-                  url = f"https://{domain_endpoint}/_plugins/_security/api/roles/{role_name}"
-                  print(f"Creating OpenSearch role: {role_name}")
-                  response = signed_request("PUT", url, region, service, credentials, role_def)
-                  print(f"Role creation response: {response.status}, body: {response.data.decode('utf-8')}")
-                  if response.status not in (200, 201):
-                      raise Exception(f"Failed to create role {role_name}: {response.data.decode('utf-8')}")
-          def handler(event, context):
-              print(f"Received event: {json.dumps(event)}")
-              try:
-                  request_type = event['RequestType']
-                  if request_type == 'Delete':
-                      send_cfn_response(event, context, 'SUCCESS', {})
-                      return
-                  region = "us-east-1"
-                  service = "es"
-                  session = boto3.Session()
-                  credentials = session.get_credentials().get_frozen_credentials()
-                  domain_endpoint = event["ResourceProperties"]["DomainEndpoint"]
-                  roles_to_map = json.loads(event["ResourceProperties"]["RoleMappings"])
-                  create_app_scoped_roles(domain_endpoint, region, service, credentials)
-                  for opensearch_role, backend_roles in roles_to_map.items():
-                      url = f"https://{domain_endpoint}/_plugins/_security/api/rolesmapping/{opensearch_role}"
-                      payload = {"backend_roles": backend_roles}
-                      print(f"Creating role mapping for {opensearch_role}: {payload}")
-                      response = signed_request("PUT", url, region, service, credentials, payload)
-                      print(f"Response status: {response.status}, body: {response.data.decode('utf-8')}")
-                      if response.status not in (200, 201):
-                          raise Exception(f"Failed to create role mapping: {response.data.decode('utf-8')}")
-                  send_cfn_response(event, context, 'SUCCESS', {"Status": "SUCCESS"})
-              except Exception as e:
-                  print(f"Error: {str(e)}")
-                  send_cfn_response(event, context, 'FAILED', {"Error": str(e)})
+  # OpenSearchRoleMappingLambda:
+  #   Type: AWS::Lambda::Function
+  #   DependsOn: OpenSearchDomain
+  #   Properties:
+  #     FunctionName: !Sub '${StackPrefix}-opensearch-role-mapping'
+  #     Runtime: python3.11
+  #     Handler: index.handler
+  #     Timeout: 300
+  #     MemorySize: 512
+  #     Role: !GetAtt OpenSearchRoleMappingLambdaRole.Arn
+  #     VpcConfig:
+  #       SubnetIds:
+  #         - !Ref PrivateSubnet1
+  #         - !Ref PrivateSubnet2
+  #       SecurityGroupIds:
+  #         - !Ref LambdaSecurityGroup
+  #     Code:
+  #       ZipFile: |
+  #         import json
+  #         import boto3
+  #         import urllib3
+  #         from botocore.awsrequest import AWSRequest
+  #         from botocore.auth import SigV4Auth
+  #         import traceback
+  #         
+  #         http = urllib3.PoolManager()
+  #         
+  #         def send_cfn_response(event, context, status, data=None, reason=None):
+  #             """Send response to CloudFormation custom resource"""
+  #             try:
+  #                 response_url = event['ResponseURL']
+  #                 response_body = {
+  #                     'Status': status,
+  #                     'PhysicalResourceId': event.get('PhysicalResourceId', event['LogicalResourceId']),
+  #                     'StackId': event['StackId'],
+  #                     'RequestId': event['RequestId'],
+  #                     'LogicalResourceId': event['LogicalResourceId'],
+  #                     'Data': data or {},
+  #                     'Reason': reason or f'{status}: See CloudWatch Logs'
+  #                 }
+  #                 print(f"Sending {status} response: {json.dumps(response_body)}")
+  #                 headers = {'Content-Type': 'application/json'}
+  #                 http.request('PUT', response_url, body=json.dumps(response_body), headers=headers)
+  #             except Exception as e:
+  #                 print(f"CRITICAL: Failed to send CFN response: {str(e)}")
+  #         
+  #         def signed_request(method, url, region, service, credentials, json_body=None):
+  #             """Make signed AWS request"""
+  #             body = json.dumps(json_body) if json_body else None
+  #             headers = {'Content-Type': 'application/json'}
+  #             aws_request = AWSRequest(method=method.upper(), url=url, data=body, headers=headers)
+  #             SigV4Auth(credentials, service, region).add_auth(aws_request)
+  #             response = http.request(
+  #                 method=aws_request.method,
+  #                 url=aws_request.url,
+  #                 body=aws_request.body,
+  #                 headers=dict(aws_request.headers)
+  #             )
+  #             return response
+  #         
+  #         def handler(event, context):
+  #             """Main handler"""
+  #             print(f"Event: {json.dumps(event)}")
+  #             try:
+  #                 request_type = event['RequestType']
+  #                 if request_type == 'Delete':
+  #                     send_cfn_response(event, context, 'SUCCESS', {'Message': 'Delete OK'})
+  #                     return
+  #                 
+  #                 domain = event['ResourceProperties']['DomainEndpoint'].replace('https://', '').replace('http://', '')
+  #                 role_mappings = json.loads(event['ResourceProperties']['RoleMappings'])
+  #                 
+  #                 session = boto3.Session()
+  #                 credentials = session.get_credentials().get_frozen_credentials()
+  #                 
+  #                 results = {}
+  #                 for role_name, backend_roles in role_mappings.items():
+  #                     url = f"https://{domain}/_plugins/_security/api/rolesmapping/{role_name}"
+  #                     body = {"backend_roles": backend_roles, "hosts": [], "users": []}
+  #                     
+  #                     print(f"Creating role mapping: {role_name}")
+  #                     resp = signed_request('PUT', url, 'us-east-1', 'es', credentials, body)
+  #                     print(f"Response: {resp.status} {resp.data.decode('utf-8')}")
+  #                     
+  #                     if resp.status not in [200, 201]:
+  #                         results[role_name] = f'FAILED: {resp.data.decode("utf-8")}'
+  #                     else:
+  #                         results[role_name] = 'SUCCESS'
+  #                 
+  #                 failures = [k for k, v in results.items() if 'FAILED' in v]
+  #                 if failures:
+  #                     send_cfn_response(event, context, 'FAILED', results, f'Failed: {failures}')
+  #                 else:
+  #                     send_cfn_response(event, context, 'SUCCESS', results, 'All mappings created')
+  #             
+  #             except Exception as e:
+  #                 error = f"Error: {str(e)}\n{traceback.format_exc()}"
+  #                 print(error)
+  #                 send_cfn_response(event, context, 'FAILED', {}, error)
 
-  OpenSearchRoleMappingCustomResource:
-    Type: Custom::OpenSearchRoleMapping
-    DependsOn:
-      - OpenSearchDomain
-      - OpenSearchRoleMappingLambda
-    Properties:
-      ServiceToken: !GetAtt OpenSearchRoleMappingLambda.Arn
-      DomainEndpoint: !GetAtt OpenSearchDomain.DomainEndpoint
-      RoleMappings: !Sub |
-        {
-          "ecs_app_role": [
-            "${ECSTaskRole.Arn}",
-            "${SearchSimilarVideosTaskRole.Arn}"
-          ],
-          "lambda_ingest_role": [
-            "${StoreEmbeddingsLambdaRole.Arn}"
-          ]
-        }
+  # OpenSearchRoleMappingCustomResource:
+  #   Type: Custom::OpenSearchRoleMapping
+  #   DependsOn:
+  #     - OpenSearchDomain
+  #     - OpenSearchRoleMappingLambda
+  #   Properties:
+  #     ServiceToken: !GetAtt OpenSearchRoleMappingLambda.Arn
+  #     DomainEndpoint: !GetAtt OpenSearchDomain.DomainEndpoint
+  #     RoleMappings: !Sub |
+  #       {
+  #         "ecs_app_role": [
+  #           "${ECSTaskRole.Arn}",
+  #           "${SearchSimilarVideosTaskRole.Arn}"
+  #         ],
+  #         "lambda_ingest_role": [
+  #           "${StoreEmbeddingsLambdaRole.Arn}"
+  #         ]
+  #       }
 
 Outputs:
   VPCId:
@@ -1789,17 +1734,19 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-ECSSecurityGroupId'
 
-  OpenSearchSecurityGroupId:
-    Description: OpenSearch Security Group ID
-    Value: !Ref OpenSearchSecurityGroup
-    Export:
-      Name: !Sub '${AWS::StackName}-OpenSearchSecurityGroupId'
+
 
   LambdaSecurityGroupId:
     Description: Lambda Security Group ID
     Value: !Ref LambdaSecurityGroup
     Export:
       Name: !Sub '${AWS::StackName}-LambdaSecurityGroupId'
+
+  VPCEndpointSecurityGroupId:
+    Description: VPC Endpoint Security Group ID
+    Value: !Ref VPCEndpointSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-VPCEndpointSecurityGroupId'
 
   ECSClusterArn:
     Description: ECS Cluster ARN
@@ -1879,17 +1826,13 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-ECSServiceName'
 
-  OpenSearchRoleMappingLambdaArn:
-    Description: OpenSearch Role Mapping Lambda Function ARN
-    Value: !GetAtt OpenSearchRoleMappingLambda.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-OpenSearchRoleMappingLambdaArn'
+  # OpenSearchRoleMappingLambdaArn:
+  #   Description: OpenSearch Role Mapping Lambda Function ARN
+  #   Value: !GetAtt OpenSearchRoleMappingLambda.Arn
+  #   Export:
+  #     Name: !Sub '${AWS::StackName}-OpenSearchRoleMappingLambdaArn'
 
-  OpenSearchRoleMappingLambdaRoleArn:
-    Description: OpenSearch Role Mapping Lambda IAM Role ARN
-    Value: !GetAtt OpenSearchRoleMappingLambdaRole.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-OpenSearchRoleMappingLambdaRoleArn'
+
 
   OpenSearchAdminRoleArn:
     Description: OpenSearch Admin IAM Role ARN
@@ -2004,3 +1947,15 @@ Outputs:
     Value: !Ref STSVPCEndpoint
     Export:
       Name: !Sub '${AWS::StackName}-STSVPCEndpointId'
+
+  OpenSearchPublicEndpoint:
+    Description: Public OpenSearch domain endpoint
+    Value: !Sub 'https://${OpenSearchDomain.DomainEndpoint}'
+    Export:
+      Name: !Sub '${AWS::StackName}-OpenSearchPublicEndpoint'
+
+  OpenSearchDashboardURL:
+    Description: OpenSearch Dashboards (Kibana) URL
+    Value: !Sub 'https://${OpenSearchDomain.DomainEndpoint}/_dashboards'
+    Export:
+      Name: !Sub '${AWS::StackName}-OpenSearchDashboardURL'
