@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: |
   Condenast Video Search Infrastructure Stack
-  
+
   IMPORTANT DEPLOYMENT NOTES:
   - OpenSearch domain creation takes 15-20 minutes. Stack will wait for completion.
   - Lambda functions require VPC endpoints for S3, ECR, Bedrock, and STS access (all included).
@@ -17,8 +17,8 @@ Parameters:
   env:
     Type: String
     Default: 'local'
-    AllowedValues: ['local', 'dev', 'staging', 'prod']
-    Description: 'Environment name for resource naming (local, dev, staging, prod)'
+    AllowedValues: [ 'local', 'dev', 'stage', 'demo', 'prod' ]
+    Description: 'Environment name for resource naming (local, dev, stage, demo, prod)'
   StackPrefix:
     Type: String
     Default: 'vs-1'
@@ -30,588 +30,661 @@ Mappings:
   EnvironmentConfig:
     local:
       AccountId: "943143228843"
+      BucketBaseName: "aihouse-dist"
     dev:
       AccountId: "726510512353"
+      BucketBaseName: "aihouse-dist"
     stage:
       AccountId: "521639666075"
+      BucketBaseName: "aihouse-nuvista-dist"
     demo:
       AccountId: "027089197617"
+      BucketBaseName: "aihouse-nuvista-dist"
     prod:
       AccountId: "144321573266"
+      BucketBaseName: "aihouse-nuvista-dist"
   BucketNames:
     Video:
       BaseName: 'videos'
-    Frontend:
-      BaseName: 'aihouse-dist'
 
 Resources:
   ECSTaskExecutionRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub '${StackPrefix}-${env}-ecs-task-execution-role'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Effect: Allow
-            Principal:
-              Service: ecs-tasks.amazonaws.com
-            Action: sts:AssumeRole
+        - Effect: Allow
+          Principal:
+            Service: ecs-tasks.amazonaws.com
+          Action: sts:AssumeRole
       Policies:
-        - PolicyName: ECRAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ecr:GetAuthorizationToken
-                  - ecr:BatchCheckLayerAvailability
-                  - ecr:GetDownloadUrlForLayer
-                  - ecr:BatchGetImage
-                Resource: '*'
-        - PolicyName: CloudWatchLogs
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource:
-                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/${StackPrefix}-${env}-video-preprocessing:*'
-                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/${StackPrefix}-${env}-search-similar-videos-task:*'
+      - PolicyName: ECRAccess
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - ecr:GetAuthorizationToken
+            - ecr:BatchCheckLayerAvailability
+            - ecr:GetDownloadUrlForLayer
+            - ecr:BatchGetImage
+            Resource: '*'
+      - PolicyName: CloudWatchLogs
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+            - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/${StackPrefix}-${env}-video-preprocessing:*'
+            - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/${StackPrefix}-${env}-search-similar-videos-task:*'
 
   ECSTaskRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub '${StackPrefix}-${env}-ecs-task-role'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Effect: Allow
-            Principal:
-              Service: ecs-tasks.amazonaws.com
-            Action: sts:AssumeRole
+        - Effect: Allow
+          Principal:
+            Service: ecs-tasks.amazonaws.com
+          Action: sts:AssumeRole
       Policies:
-        - PolicyName: S3Access
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                Resource: !Sub 
-                  - 'arn:aws:s3:::${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}/*'
-                  - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
-                    TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
-              - Effect: Allow
-                Action:
-                  - s3:PutObject
-                Resource: !Sub 
-                  - 'arn:aws:s3:::${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}/*'
-                  - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
-                    TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
-              - Effect: Allow
-                Action:
-                  - s3:ListBucket
-                Resource:
-                  - !Sub 
-                    - 'arn:aws:s3:::${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}'
-                    - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
-                      TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
-              - Effect: Allow
-                Action:
-                  - s3:PutObject
-                  - s3:GetObject
-                  - s3:ListBucket
-                Resource: 
-                  - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
-                  - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'
-        - PolicyName: StepFunctionsAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - states:SendTaskSuccess
-                  - states:SendTaskFailure
-                Resource: '*'
+      - PolicyName: S3Access
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - s3:GetObject
+            Resource: !Sub
+              - 'arn:aws:s3:::${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}/*'
+              - VideoBucket: !FindInMap [ BucketNames, Video, BaseName ]
+                TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
+          - Effect: Allow
+            Action:
+            - s3:PutObject
+            Resource: !Sub
+              - 'arn:aws:s3:::${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}/*'
+              - VideoBucket: !FindInMap [ BucketNames, Video, BaseName ]
+                TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
+          - Effect: Allow
+            Action:
+            - s3:ListBucket
+            Resource:
+            - !Sub
+              - 'arn:aws:s3:::${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}'
+              - VideoBucket: !FindInMap [ BucketNames, Video, BaseName ]
+                TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
+          - Effect: Allow
+            Action:
+            - s3:PutObject
+            - s3:GetObject
+            - s3:ListBucket
+            Resource:
+            - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
+            - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'
+      - PolicyName: StepFunctionsAccess
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - states:SendTaskSuccess
+            - states:SendTaskFailure
+            Resource: '*'
 
   SearchSimilarVideosTaskRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub '${StackPrefix}-${env}-search-similar-videos-ecs-task-role'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Effect: Allow
-            Principal:
-              Service: ecs-tasks.amazonaws.com
-            Action: sts:AssumeRole
+        - Effect: Allow
+          Principal:
+            Service: ecs-tasks.amazonaws.com
+          Action: sts:AssumeRole
       Policies:
-        - PolicyName: OpenSearchAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Sid: OpenSearchAccess
-                Effect: Allow
-                Action:
-                  - es:ESHttpGet
-                  - es:ESHttpPost
-                  - es:ESHttpPut
-                  - es:ESHttpDelete
-                  - es:ESHttpHead
-                Resource:
-                  - !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${StackPrefix}-${env}-aos/*'
-        - PolicyName: BedrockInvokeModel
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Sid: BedrockInvokeModel
-                Effect: Allow
-                Action:
-                  - bedrock:InvokeModel
-                  - bedrock:InvokeModelWithResponseStream
-                Resource:
-                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*'
-                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/us.twelvelabs.marengo-embed-2-7-v1:0'
-                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/twelvelabs.marengo-embed-2-7-v1:0'
-                  - arn:aws:bedrock:us-east-2::foundation-model/twelvelabs.marengo-embed-2-7-v1:0
-                  - arn:aws:bedrock:us-west-2::foundation-model/twelvelabs.marengo-embed-2-7-v1:0
-                  - arn:aws:bedrock:us-west-1::foundation-model/twelvelabs.marengo-embed-2-7-v1:0
-                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/us.twelvelabs.marengo-embed-3-0-v1:0'
-                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/twelvelabs.marengo-embed-3-0-v1:0'
-                  - arn:aws:bedrock:us-east-2::foundation-model/twelvelabs.marengo-embed-3-0-v1:0
-                  - arn:aws:bedrock:us-west-2::foundation-model/twelvelabs.marengo-embed-3-0-v1:0
-                  - arn:aws:bedrock:us-west-1::foundation-model/twelvelabs.marengo-embed-3-0-v1:0
-                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.nova-micro-v1:0'
-        - PolicyName: S3ReadAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Sid: S3ReadAccess
-                Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:GetObjectVersion
-                  - s3:ListBucket
-                  - s3:PutObject
-                Resource:
-                  - !Sub 
-                    - 'arn:aws:s3:::${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}'
-                    - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
-                      TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
-                  - !Sub 
-                    - 'arn:aws:s3:::${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}/*'
-                    - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
-                      TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
-                  - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
-                  - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'
-        - PolicyName: SSMMessagesAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ssmmessages:CreateControlChannel
-                  - ssmmessages:CreateDataChannel
-                  - ssmmessages:OpenControlChannel
-                  - ssmmessages:OpenDataChannel
-                Resource: '*'
+      - PolicyName: OpenSearchAccess
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Sid: OpenSearchAccess
+            Effect: Allow
+            Action:
+            - es:ESHttpGet
+            - es:ESHttpPost
+            - es:ESHttpPut
+            - es:ESHttpDelete
+            - es:ESHttpHead
+            Resource:
+            - !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${StackPrefix}-${env}-aos/*'
+      - PolicyName: BedrockInvokeModel
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Sid: BedrockInvokeModel
+            Effect: Allow
+            Action:
+            - bedrock:InvokeModel
+            - bedrock:InvokeModelWithResponseStream
+            Resource:
+            - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*'
+            - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/us.twelvelabs.marengo-embed-2-7-v1:0'
+            - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/twelvelabs.marengo-embed-2-7-v1:0'
+            - arn:aws:bedrock:us-east-2::foundation-model/twelvelabs.marengo-embed-2-7-v1:0
+            - arn:aws:bedrock:us-west-2::foundation-model/twelvelabs.marengo-embed-2-7-v1:0
+            - arn:aws:bedrock:us-west-1::foundation-model/twelvelabs.marengo-embed-2-7-v1:0
+            - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/us.twelvelabs.marengo-embed-3-0-v1:0'
+            - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/twelvelabs.marengo-embed-3-0-v1:0'
+            - arn:aws:bedrock:us-east-2::foundation-model/twelvelabs.marengo-embed-3-0-v1:0
+            - arn:aws:bedrock:us-west-2::foundation-model/twelvelabs.marengo-embed-3-0-v1:0
+            - arn:aws:bedrock:us-west-1::foundation-model/twelvelabs.marengo-embed-3-0-v1:0
+            - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.nova-micro-v1:0'
+      - PolicyName: S3ReadAccess
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Sid: S3ReadAccess
+            Effect: Allow
+            Action:
+            - s3:GetObject
+            - s3:GetObjectVersion
+            - s3:ListBucket
+            - s3:PutObject
+            Resource:
+            - !Sub
+              - 'arn:aws:s3:::${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}'
+              - VideoBucket: !FindInMap [ BucketNames, Video, BaseName ]
+                TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
+            - !Sub
+              - 'arn:aws:s3:::${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}/*'
+              - VideoBucket: !FindInMap [ BucketNames, Video, BaseName ]
+                TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
+            - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
+            - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'
+      - PolicyName: SSMMessagesAccess
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - ssmmessages:CreateControlChannel
+            - ssmmessages:CreateDataChannel
+            - ssmmessages:OpenControlChannel
+            - ssmmessages:OpenDataChannel
+            Resource: '*'
 
   InvokeBedrockMarengoRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub '${StackPrefix}-${env}-invoke-bedrock-marengo-role'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
       Policies:
-        - PolicyName: CloudWatchLogs
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: logs:CreateLogGroup
-                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*'
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackPrefix}-${env}-invoke-bedrock-marengo:*'
-        - PolicyName: S3Access
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:PutObject
-                  - s3:ListBucket
-                Resource:
-                  - !Sub 
-                    - 'arn:aws:s3:::${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}}/*'
-                    - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
-                      TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
-                  - !Sub 
-                    - 'arn:aws:s3:::${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}'
-                    - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
-                      TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:PutObject
-                  - s3:ListBucket
-                Resource: 
-                  - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'
-                  - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
-        - PolicyName: BedrockAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - bedrock:InvokeModel
-                  - bedrock:InvokeModelWithResponseStream
-                  - bedrock:GetAsyncInvoke
-                  - bedrock:StartAsyncInvoke
-                Resource:
-                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:async-invoke/*'
-                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/twelvelabs.marengo-embed-2-7-v1:0'
-                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*'
-                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:model-invocation-job/*'
-              - Effect: Allow
-                Action:
-                  - bedrock:InvokeModel
-                  - bedrock:InvokeModelWithResponseStream
-                  - bedrock:GetAsyncInvoke
-                  - bedrock:StartAsyncInvoke
-                Resource:
-                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:async-invoke/*'
-                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/twelvelabs.marengo-embed-3-0-v1:0'
-                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*'
-                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:model-invocation-job/*'
-              - Effect: Allow
-                Action: iam:PassRole
-                Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${StackPrefix}-${env}-invoke-bedrock-marengo-role'
-                Condition:
-                  StringEquals:
-                    iam:PassedToService: bedrock.amazonaws.com
-              - Effect: Allow
-                Action:
-                  - aws-marketplace:ViewSubscriptions
-                  - aws-marketplace:Subscribe
-                Resource: '*'
+      - PolicyName: CloudWatchLogs
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action: logs:CreateLogGroup
+            Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*'
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackPrefix}-${env}-invoke-bedrock-marengo:*'
+      - PolicyName: S3Access
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - s3:GetObject
+            - s3:PutObject
+            - s3:ListBucket
+            Resource:
+            - !Sub
+              - 'arn:aws:s3:::${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}}/*'
+              - VideoBucket: !FindInMap [ BucketNames, Video, BaseName ]
+                TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
+            - !Sub
+              - 'arn:aws:s3:::${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}'
+              - VideoBucket: !FindInMap [ BucketNames, Video, BaseName ]
+                TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
+          - Effect: Allow
+            Action:
+            - s3:GetObject
+            - s3:PutObject
+            - s3:ListBucket
+            Resource:
+            - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'
+            - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
+      - PolicyName: BedrockAccess
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - bedrock:InvokeModel
+            - bedrock:InvokeModelWithResponseStream
+            - bedrock:GetAsyncInvoke
+            - bedrock:StartAsyncInvoke
+            Resource:
+            - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:async-invoke/*'
+            - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/twelvelabs.marengo-embed-2-7-v1:0'
+            - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*'
+            - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:model-invocation-job/*'
+          - Effect: Allow
+            Action:
+            - bedrock:InvokeModel
+            - bedrock:InvokeModelWithResponseStream
+            - bedrock:GetAsyncInvoke
+            - bedrock:StartAsyncInvoke
+            Resource:
+            - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:async-invoke/*'
+            - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/twelvelabs.marengo-embed-3-0-v1:0'
+            - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*'
+            - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:model-invocation-job/*'
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${StackPrefix}-${env}-invoke-bedrock-marengo-role'
+            Condition:
+              StringEquals:
+                iam:PassedToService: bedrock.amazonaws.com
+          - Effect: Allow
+            Action:
+            - aws-marketplace:ViewSubscriptions
+            - aws-marketplace:Subscribe
+            Resource: '*'
 
   InvokeVideoProcessingStepFunctionRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub '${StackPrefix}-${env}-invoke-video-processing-step-function-role'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
       Policies:
-        - PolicyName: CloudWatchLogs
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: logs:CreateLogGroup
-                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*'
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackPrefix}-${env}-invoke-video-processing-step-function:*'
-        - PolicyName: StepFunctionsAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: states:StartExecution
-                Resource: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${StackPrefix}-${env}-pipeline'
+      - PolicyName: CloudWatchLogs
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action: logs:CreateLogGroup
+            Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*'
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackPrefix}-${env}-invoke-video-processing-step-function:*'
+      - PolicyName: StepFunctionsAccess
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action: states:StartExecution
+            Resource: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${StackPrefix}-${env}-pipeline'
 
   OpenSearchSnapshotRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub '${StackPrefix}-${env}-opensearch-snapshot-role'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Effect: Allow
-            Principal:
-              Service: es.amazonaws.com
-            Action: sts:AssumeRole
+        - Effect: Allow
+          Principal:
+            Service: es.amazonaws.com
+          Action: sts:AssumeRole
       Policies:
-        - PolicyName: S3Access
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Action:
-                  - s3:ListBucket
-                Effect: Allow
-                Resource:
-                  - !Sub 
-                    - 'arn:aws:s3:::${env}-${FrontendBucket}-${TargetAccountId}'
-                    - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
-                      TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
-              - Action:
-                  - s3:GetObject
-                  - s3:PutObject
-                  - s3:DeleteObject
-                Effect: Allow
-                Resource:
-                  - !Sub 
-                    - 'arn:aws:s3:::${env}-${FrontendBucket}-${TargetAccountId}/*'
-                    - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
-                      TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
+      - PolicyName: S3Access
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Action:
+            - s3:ListBucket
+            Effect: Allow
+            Resource:
+            - !Sub
+              - 'arn:aws:s3:::${env}-${FrontendBucket}-${TargetAccountId}'
+              - FrontendBucket: !FindInMap [ EnvironmentConfig, !Ref env, BucketBaseName ]
+                TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
+          - Action:
+            - s3:GetObject
+            - s3:PutObject
+            - s3:DeleteObject
+            Effect: Allow
+            Resource:
+            - !Sub
+              - 'arn:aws:s3:::${env}-${FrontendBucket}-${TargetAccountId}/*'
+              - FrontendBucket: !FindInMap [ EnvironmentConfig, !Ref env, BucketBaseName ]
+                TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
 
   CreateSnapshotLambdaRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub '${StackPrefix}-${env}-create-opensearch-snapshot-lambda-role'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
       Policies:
-        - PolicyName: CloudWatchLogs
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: logs:CreateLogGroup
-                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*'
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackPrefix}-${env}-create-opensearch-snapshot:*'
-        - PolicyName: OpenSearchAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - es:ESHttpPut
-                  - es:ESHttpGet
-                Resource: !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${StackPrefix}-${env}-aos/*'
-              - Effect: Allow
-                Action: iam:PassRole
-                Resource: !GetAtt OpenSearchSnapshotRole.Arn
+      - PolicyName: CloudWatchLogs
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action: logs:CreateLogGroup
+            Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*'
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackPrefix}-${env}-create-opensearch-snapshot:*'
+      - PolicyName: OpenSearchAccess
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - es:ESHttpPut
+            - es:ESHttpGet
+            Resource: !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${StackPrefix}-${env}-aos/*'
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource: !GetAtt OpenSearchSnapshotRole.Arn
 
   StoreEmbeddingsLambdaRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub '${StackPrefix}-${env}-store-embeddings-opensearch-lambda-role'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
       Policies:
-        - PolicyName: CloudWatchLogs
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: logs:CreateLogGroup
-                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*'
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackPrefix}-${env}-store-embeddings-opensearch:*'
-        - PolicyName: S3Access
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:ListBucket
-                  - s3:PutObject
-                Resource:
-                  - !Sub 
-                    - 'arn:aws:s3:::${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}/*'
-                    - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
-                      TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
-                  - !Sub 
-                    - 'arn:aws:s3:::${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}'
-                    - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
-                      TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
-              - Effect: Allow
-                Action:
-                  - s3:PutObject
-                  - s3:GetObject
-                  - s3:ListBucket
-                Resource: 
-                  - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'
-                  - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
-        - PolicyName: EC2NetworkInterface
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ec2:CreateNetworkInterface
-                  - ec2:DescribeNetworkInterfaces
-                  - ec2:DeleteNetworkInterface
-                Resource: '*'
-        - PolicyName: OpenSearchAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - es:ESHttpGet
-                  - es:ESHttpPost
-                  - es:ESHttpPut
-                  - es:ESHttpDelete
-                  - es:ESHttpHead
-                Resource:
-                  - !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${StackPrefix}-${env}-aos/*'
-        - PolicyName: AOSSAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - aoss:APIAccessAll
-                Resource:
-                  - !Sub 'arn:aws:aoss:${AWS::Region}:${AWS::AccountId}:collection/*'
-                  - !Sub 'arn:aws:aoss:${AWS::Region}:${AWS::AccountId}:collection/10hkpuukzb763aqe0uhi'
+      - PolicyName: CloudWatchLogs
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action: logs:CreateLogGroup
+            Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*'
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackPrefix}-${env}-store-embeddings-opensearch:*'
+      - PolicyName: S3Access
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - s3:GetObject
+            - s3:ListBucket
+            - s3:PutObject
+            Resource:
+            - !Sub
+              - 'arn:aws:s3:::${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}/*'
+              - VideoBucket: !FindInMap [ BucketNames, Video, BaseName ]
+                TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
+            - !Sub
+              - 'arn:aws:s3:::${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}'
+              - VideoBucket: !FindInMap [ BucketNames, Video, BaseName ]
+                TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
+          - Effect: Allow
+            Action:
+            - s3:PutObject
+            - s3:GetObject
+            - s3:ListBucket
+            Resource:
+            - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'
+            - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
+      - PolicyName: EC2NetworkInterface
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - ec2:CreateNetworkInterface
+            - ec2:DescribeNetworkInterfaces
+            - ec2:DeleteNetworkInterface
+            Resource: '*'
+      - PolicyName: OpenSearchAccess
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - es:ESHttpGet
+            - es:ESHttpPost
+            - es:ESHttpPut
+            - es:ESHttpDelete
+            - es:ESHttpHead
+            Resource:
+            - !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${StackPrefix}-${env}-aos/*'
+      - PolicyName: AOSSAccess
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - aoss:APIAccessAll
+            Resource:
+            - !Sub 'arn:aws:aoss:${AWS::Region}:${AWS::AccountId}:collection/*'
+            - !Sub 'arn:aws:aoss:${AWS::Region}:${AWS::AccountId}:collection/10hkpuukzb763aqe0uhi'
 
   StepFunctionsExecutionRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub '${StackPrefix}-${env}-complete-video-processing-pipeline-role'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Effect: Allow
-            Principal:
-              Service: states.amazonaws.com
-            Action: sts:AssumeRole
+        - Effect: Allow
+          Principal:
+            Service: states.amazonaws.com
+          Action: sts:AssumeRole
       Policies:
-        - PolicyName: BedrockAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - bedrock:GetAsyncInvoke
-                Resource:
-                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:async-invoke/*'
-        - PolicyName: IAMPassRole
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: iam:PassRole
-                Resource:
-                  - !GetAtt ECSTaskExecutionRole.Arn
-                  - !GetAtt ECSTaskRole.Arn
-        - PolicyName: LambdaInvoke
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: lambda:InvokeFunction
-                Resource:
-                  - !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${StackPrefix}-${env}-invoke-bedrock-marengo'
-                  - !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${StackPrefix}-${env}-store-embeddings-opensearch'
-        - PolicyName: ECSRunTask
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ecs:RunTask
-                Resource:
-                  - !Ref VideoPreprocessingTaskDefinition
-              - Effect: Allow
-                Action:
-                  - ecs:StopTask
-                  - ecs:DescribeTasks
-                Resource: '*'
-              - Effect: Allow
-                Action:
-                  - events:PutTargets
-                  - events:PutRule
-                  - events:DescribeRule
-                Resource:
-                  - !Sub 'arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/StepFunctionsGetEventsForECSTaskRule'
-        - PolicyName: XRayAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - xray:PutTraceSegments
-                  - xray:PutTelemetryRecords
-                  - xray:GetSamplingRules
-                  - xray:GetSamplingTargets
-                Resource: '*'
+      - PolicyName: BedrockAccess
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - bedrock:GetAsyncInvoke
+            Resource:
+            - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:async-invoke/*'
+      - PolicyName: IAMPassRole
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource:
+            - !GetAtt ECSTaskExecutionRole.Arn
+            - !GetAtt ECSTaskRole.Arn
+      - PolicyName: LambdaInvoke
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource:
+            - !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${StackPrefix}-${env}-invoke-bedrock-marengo'
+            - !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${StackPrefix}-${env}-store-embeddings-opensearch'
+      - PolicyName: ECSRunTask
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - ecs:RunTask
+            Resource:
+            - !Ref VideoPreprocessingTaskDefinition
+          - Effect: Allow
+            Action:
+            - ecs:StopTask
+            - ecs:DescribeTasks
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - events:PutTargets
+            - events:PutRule
+            - events:DescribeRule
+            Resource:
+            - !Sub 'arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/StepFunctionsGetEventsForECSTaskRule'
+      - PolicyName: XRayAccess
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - xray:PutTraceSegments
+            - xray:PutTelemetryRecords
+            - xray:GetSamplingRules
+            - xray:GetSamplingTargets
+            Resource: '*'
 
   # ============ NEW IAM ROLE FOR FRONTEND CONFIG UPDATE LAMBDA ============
   UpdateFrontendConfigLambdaRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub '${StackPrefix}-${env}-update-frontend-config-role'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - PolicyName: S3ConfigAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:PutObject
-                  - s3:PutObjectAcl
-                  - s3:GetObject
-                Resource:
-                  - !Sub 
-                    - 'arn:aws:s3:::${env}-${FrontendBucket}-${TargetAccountId}/*'
-                    - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
-                      TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
-              - Effect: Allow
-                Action:
-                  - s3:ListBucket
-                Resource:
-                  - !Sub 
-                    - 'arn:aws:s3:::${env}-${FrontendBucket}-${TargetAccountId}'
-                    - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
-                      TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
+      - PolicyName: S3ConfigAccess
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - s3:PutObject
+            - s3:PutObjectAcl
+            - s3:GetObject
+            Resource:
+            - !Sub
+              - 'arn:aws:s3:::${env}-${FrontendBucket}-${TargetAccountId}/*'
+              - FrontendBucket: !FindInMap [ EnvironmentConfig, !Ref env, BucketBaseName ]
+                TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
+          - Effect: Allow
+            Action:
+            - s3:ListBucket
+            Resource:
+            - !Sub
+              - 'arn:aws:s3:::${env}-${FrontendBucket}-${TargetAccountId}'
+              - FrontendBucket: !FindInMap [ EnvironmentConfig, !Ref env, BucketBaseName ]
+                TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
   VPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -619,23 +692,23 @@ Resources:
       EnableDnsHostnames: true
       EnableDnsSupport: true
       Tags:
-        - Key: Name
-          Value: !Sub '${StackPrefix}-${env}-vpc'
-        - Key: Environment
-          Value: !Ref env
-        - Key: StackPrefix
-          Value: !Ref StackPrefix
+      - Key: Name
+        Value: !Sub '${StackPrefix}-${env}-vpc'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
       Tags:
-        - Key: Name
-          Value: !Sub '${StackPrefix}-${env}-igw'
-        - Key: Environment
-          Value: !Ref env
-        - Key: StackPrefix
-          Value: !Ref StackPrefix
+      - Key: Name
+        Value: !Sub '${StackPrefix}-${env}-igw'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
 
   InternetGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -647,61 +720,61 @@ Resources:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
-      AvailabilityZone: !Select [0, !GetAZs '']
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
       CidrBlock: 10.0.1.0/24
       MapPublicIpOnLaunch: true
       Tags:
-        - Key: Name
-          Value: !Sub '${StackPrefix}-${env}-public-subnet-1'
-        - Key: Environment
-          Value: !Ref env
-        - Key: StackPrefix
-          Value: !Ref StackPrefix
+      - Key: Name
+        Value: !Sub '${StackPrefix}-${env}-public-subnet-1'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
 
   PublicSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
-      AvailabilityZone: !Select [1, !GetAZs '']
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
       CidrBlock: 10.0.2.0/24
       MapPublicIpOnLaunch: true
       Tags:
-        - Key: Name
-          Value: !Sub '${StackPrefix}-${env}-public-subnet-2'
-        - Key: Environment
-          Value: !Ref env
-        - Key: StackPrefix
-          Value: !Ref StackPrefix
+      - Key: Name
+        Value: !Sub '${StackPrefix}-${env}-public-subnet-2'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
 
   PrivateSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
-      AvailabilityZone: !Select [0, !GetAZs '']
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
       CidrBlock: 10.0.3.0/24
       MapPublicIpOnLaunch: false
       Tags:
-        - Key: Name
-          Value: !Sub '${StackPrefix}-${env}-private-subnet-1'
-        - Key: Environment
-          Value: !Ref env
-        - Key: StackPrefix
-          Value: !Ref StackPrefix
+      - Key: Name
+        Value: !Sub '${StackPrefix}-${env}-private-subnet-1'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
 
   PrivateSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
-      AvailabilityZone: !Select [1, !GetAZs '']
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
       CidrBlock: 10.0.4.0/24
       MapPublicIpOnLaunch: false
       Tags:
-        - Key: Name
-          Value: !Sub '${StackPrefix}-${env}-private-subnet-2'
-        - Key: Environment
-          Value: !Ref env
-        - Key: StackPrefix
-          Value: !Ref StackPrefix
+      - Key: Name
+        Value: !Sub '${StackPrefix}-${env}-private-subnet-2'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
 
   NatGatewayEIP:
     Type: AWS::EC2::EIP
@@ -709,12 +782,12 @@ Resources:
     Properties:
       Domain: vpc
       Tags:
-        - Key: Name
-          Value: !Sub '${StackPrefix}-${env}-nat-eip'
-        - Key: Environment
-          Value: !Ref env
-        - Key: StackPrefix
-          Value: !Ref StackPrefix
+      - Key: Name
+        Value: !Sub '${StackPrefix}-${env}-nat-eip'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
 
   NatGateway:
     Type: AWS::EC2::NatGateway
@@ -722,24 +795,24 @@ Resources:
       AllocationId: !GetAtt NatGatewayEIP.AllocationId
       SubnetId: !Ref PublicSubnet1
       Tags:
-        - Key: Name
-          Value: !Sub '${StackPrefix}-${env}-nat-gateway'
-        - Key: Environment
-          Value: !Ref env
-        - Key: StackPrefix
-          Value: !Ref StackPrefix
+      - Key: Name
+        Value: !Sub '${StackPrefix}-${env}-nat-gateway'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
 
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VPC
       Tags:
-        - Key: Name
-          Value: !Sub '${StackPrefix}-${env}-public-rt'
-        - Key: Environment
-          Value: !Ref env
-        - Key: StackPrefix
-          Value: !Ref StackPrefix
+      - Key: Name
+        Value: !Sub '${StackPrefix}-${env}-public-rt'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
 
   DefaultPublicRoute:
     Type: AWS::EC2::Route
@@ -766,12 +839,12 @@ Resources:
     Properties:
       VpcId: !Ref VPC
       Tags:
-        - Key: Name
-          Value: !Sub '${StackPrefix}-${env}-private-rt'
-        - Key: Environment
-          Value: !Ref env
-        - Key: StackPrefix
-          Value: !Ref StackPrefix
+      - Key: Name
+        Value: !Sub '${StackPrefix}-${env}-private-rt'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
 
   DefaultPrivateRoute:
     Type: AWS::EC2::Route
@@ -799,27 +872,27 @@ Resources:
       GroupDescription: !Sub 'Security group for ${StackPrefix}-${env} ALB'
       VpcId: !Ref VPC
       SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 8000
-          ToPort: 8000
-          CidrIp: 0.0.0.0/0
-          Description: Allow HTTP 8000 from anywhere
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: 0.0.0.0/0
-          Description: Allow HTTPS from anywhere
+      - IpProtocol: tcp
+        FromPort: 8000
+        ToPort: 8000
+        CidrIp: 0.0.0.0/0
+        Description: Allow HTTP 8000 from anywhere
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 0.0.0.0/0
+        Description: Allow HTTPS from anywhere
       SecurityGroupEgress:
-        - IpProtocol: "-1"
-          CidrIp: 0.0.0.0/0
-          Description: Allow all outbound traffic
+      - IpProtocol: "-1"
+        CidrIp: 0.0.0.0/0
+        Description: Allow all outbound traffic
       Tags:
-        - Key: Name
-          Value: !Sub '${StackPrefix}-${env}-alb-sg'
-        - Key: Environment
-          Value: !Ref env
-        - Key: StackPrefix
-          Value: !Ref StackPrefix
+      - Key: Name
+        Value: !Sub '${StackPrefix}-${env}-alb-sg'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
 
   ECSSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -828,24 +901,22 @@ Resources:
       GroupDescription: !Sub 'Security group for ${StackPrefix}-${env} ECS tasks'
       VpcId: !Ref VPC
       SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 8000
-          ToPort: 8000
-          SourceSecurityGroupId: !Ref ALBSecurityGroup
-          Description: Allow traffic from ALB
+      - IpProtocol: tcp
+        FromPort: 8000
+        ToPort: 8000
+        SourceSecurityGroupId: !Ref ALBSecurityGroup
+        Description: Allow traffic from ALB
       SecurityGroupEgress:
-        - IpProtocol: "-1"
-          CidrIp: 0.0.0.0/0
-          Description: Allow all outbound traffic
+      - IpProtocol: "-1"
+        CidrIp: 0.0.0.0/0
+        Description: Allow all outbound traffic
       Tags:
-        - Key: Name
-          Value: !Sub '${StackPrefix}-${env}-ecs-sg'
-        - Key: Environment
-          Value: !Ref env
-        - Key: StackPrefix
-          Value: !Ref StackPrefix
-
-
+      - Key: Name
+        Value: !Sub '${StackPrefix}-${env}-ecs-sg'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
 
   LambdaSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -854,16 +925,16 @@ Resources:
       GroupDescription: !Sub 'Security group for ${StackPrefix}-${env} Lambda functions'
       VpcId: !Ref VPC
       SecurityGroupEgress:
-        - IpProtocol: "-1"
-          CidrIp: 0.0.0.0/0
-          Description: Allow all outbound traffic
+      - IpProtocol: "-1"
+        CidrIp: 0.0.0.0/0
+        Description: Allow all outbound traffic
       Tags:
-        - Key: Name
-          Value: !Sub '${StackPrefix}-${env}-lambda-sg'
-        - Key: Environment
-          Value: !Ref env
-        - Key: StackPrefix
-          Value: !Ref StackPrefix
+      - Key: Name
+        Value: !Sub '${StackPrefix}-${env}-lambda-sg'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
 
   VPCEndpointSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -872,27 +943,27 @@ Resources:
       GroupDescription: !Sub 'Security group for ${StackPrefix}-${env} VPC endpoints'
       VpcId: !Ref VPC
       SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          SourceSecurityGroupId: !Ref ECSSecurityGroup
-          Description: Allow HTTPS from ECS tasks
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          SourceSecurityGroupId: !Ref LambdaSecurityGroup
-          Description: Allow HTTPS from Lambda functions
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        SourceSecurityGroupId: !Ref ECSSecurityGroup
+        Description: Allow HTTPS from ECS tasks
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        SourceSecurityGroupId: !Ref LambdaSecurityGroup
+        Description: Allow HTTPS from Lambda functions
       SecurityGroupEgress:
-        - IpProtocol: "-1"
-          CidrIp: 0.0.0.0/0
-          Description: Allow all outbound traffic
+      - IpProtocol: "-1"
+        CidrIp: 0.0.0.0/0
+        Description: Allow all outbound traffic
       Tags:
-        - Key: Name
-          Value: !Sub '${StackPrefix}-${env}-vpc-endpoint-sg'
-        - Key: Environment
-          Value: !Ref env
-        - Key: StackPrefix
-          Value: !Ref StackPrefix
+      - Key: Name
+        Value: !Sub '${StackPrefix}-${env}-vpc-endpoint-sg'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
 
   S3VPCEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -900,14 +971,14 @@ Resources:
       VpcId: !Ref VPC
       ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
       RouteTableIds:
-        - !Ref PrivateRouteTable
+      - !Ref PrivateRouteTable
       Tags:
-        - Key: Name
-          Value: !Sub '${StackPrefix}-${env}-s3-endpoint'
-        - Key: Environment
-          Value: !Ref env
-        - Key: StackPrefix
-          Value: !Ref StackPrefix
+      - Key: Name
+        Value: !Sub '${StackPrefix}-${env}-s3-endpoint'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
 
   ECRAPIVPCEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -916,18 +987,18 @@ Resources:
       VpcEndpointType: Interface
       ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ecr.api'
       SubnetIds:
-        - !Ref PrivateSubnet1
-        - !Ref PrivateSubnet2
+      - !Ref PrivateSubnet1
+      - !Ref PrivateSubnet2
       SecurityGroupIds:
-        - !Ref VPCEndpointSecurityGroup
+      - !Ref VPCEndpointSecurityGroup
       PrivateDnsEnabled: true
       Tags:
-        - Key: Name
-          Value: !Sub '${StackPrefix}-${env}-ecr-api-endpoint'
-        - Key: Environment
-          Value: !Ref env
-        - Key: StackPrefix
-          Value: !Ref StackPrefix
+      - Key: Name
+        Value: !Sub '${StackPrefix}-${env}-ecr-api-endpoint'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
 
   ECRDKRVPCEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -936,18 +1007,18 @@ Resources:
       VpcEndpointType: Interface
       ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ecr.dkr'
       SubnetIds:
-        - !Ref PrivateSubnet1
-        - !Ref PrivateSubnet2
+      - !Ref PrivateSubnet1
+      - !Ref PrivateSubnet2
       SecurityGroupIds:
-        - !Ref VPCEndpointSecurityGroup
+      - !Ref VPCEndpointSecurityGroup
       PrivateDnsEnabled: true
       Tags:
-        - Key: Name
-          Value: !Sub '${StackPrefix}-${env}-ecr-dkr-endpoint'
-        - Key: Environment
-          Value: !Ref env
-        - Key: StackPrefix
-          Value: !Ref StackPrefix
+      - Key: Name
+        Value: !Sub '${StackPrefix}-${env}-ecr-dkr-endpoint'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
 
   BedrockVPCEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -956,18 +1027,18 @@ Resources:
       VpcEndpointType: Interface
       ServiceName: !Sub 'com.amazonaws.${AWS::Region}.bedrock'
       SubnetIds:
-        - !Ref PrivateSubnet1
-        - !Ref PrivateSubnet2
+      - !Ref PrivateSubnet1
+      - !Ref PrivateSubnet2
       SecurityGroupIds:
-        - !Ref VPCEndpointSecurityGroup
+      - !Ref VPCEndpointSecurityGroup
       PrivateDnsEnabled: true
       Tags:
-        - Key: Name
-          Value: !Sub '${StackPrefix}-${env}-bedrock-endpoint'
-        - Key: Environment
-          Value: !Ref env
-        - Key: StackPrefix
-          Value: !Ref StackPrefix
+      - Key: Name
+        Value: !Sub '${StackPrefix}-${env}-bedrock-endpoint'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
 
   BedrockRuntimeVPCEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -976,18 +1047,18 @@ Resources:
       VpcEndpointType: Interface
       ServiceName: !Sub 'com.amazonaws.${AWS::Region}.bedrock-runtime'
       SubnetIds:
-        - !Ref PrivateSubnet1
-        - !Ref PrivateSubnet2
+      - !Ref PrivateSubnet1
+      - !Ref PrivateSubnet2
       SecurityGroupIds:
-        - !Ref VPCEndpointSecurityGroup
+      - !Ref VPCEndpointSecurityGroup
       PrivateDnsEnabled: true
       Tags:
-        - Key: Name
-          Value: !Sub '${StackPrefix}-${env}-bedrock-runtime-endpoint'
-        - Key: Environment
-          Value: !Ref env
-        - Key: StackPrefix
-          Value: !Ref StackPrefix
+      - Key: Name
+        Value: !Sub '${StackPrefix}-${env}-bedrock-runtime-endpoint'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
 
   StepFunctionsVPCEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -996,18 +1067,18 @@ Resources:
       VpcEndpointType: Interface
       ServiceName: !Sub 'com.amazonaws.${AWS::Region}.states'
       SubnetIds:
-        - !Ref PrivateSubnet1
-        - !Ref PrivateSubnet2
+      - !Ref PrivateSubnet1
+      - !Ref PrivateSubnet2
       SecurityGroupIds:
-        - !Ref VPCEndpointSecurityGroup
+      - !Ref VPCEndpointSecurityGroup
       PrivateDnsEnabled: true
       Tags:
-        - Key: Name
-          Value: !Sub '${StackPrefix}-${env}-states-endpoint'
-        - Key: Environment
-          Value: !Ref env
-        - Key: StackPrefix
-          Value: !Ref StackPrefix
+      - Key: Name
+        Value: !Sub '${StackPrefix}-${env}-states-endpoint'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
 
   STSVPCEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -1016,79 +1087,100 @@ Resources:
       VpcEndpointType: Interface
       ServiceName: !Sub 'com.amazonaws.${AWS::Region}.sts'
       SubnetIds:
-        - !Ref PrivateSubnet1
-        - !Ref PrivateSubnet2
+      - !Ref PrivateSubnet1
+      - !Ref PrivateSubnet2
       SecurityGroupIds:
-        - !Ref VPCEndpointSecurityGroup
+      - !Ref VPCEndpointSecurityGroup
       PrivateDnsEnabled: true
       Tags:
-        - Key: Name
-          Value: !Sub '${StackPrefix}-${env}-sts-endpoint'
-        - Key: Environment
-          Value: !Ref env
-        - Key: StackPrefix
-          Value: !Ref StackPrefix
+      - Key: Name
+        Value: !Sub '${StackPrefix}-${env}-sts-endpoint'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
 
   OpenSearchRoleMappingLambdaRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub '${StackPrefix}-${env}-opensearch-role-mapper-role'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - PolicyName: AssumeAdminRole
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: sts:AssumeRole
-                Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${StackPrefix}-${env}-opensearch-admin'
+      - PolicyName: AssumeAdminRole
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${StackPrefix}-${env}-opensearch-admin'
 
   OpenSearchAdminRole:
     Type: AWS::IAM::Role
     DependsOn: OpenSearchRoleMappingLambdaRole
     Properties:
       RoleName: !Sub '${StackPrefix}-${env}-opensearch-admin'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Effect: Allow
-            Principal:
-              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
-            Action: sts:AssumeRole
-          - Effect: Allow
-            Principal:
-              AWS: !GetAtt OpenSearchRoleMappingLambdaRole.Arn
-            Action: sts:AssumeRole
+        - Effect: Allow
+          Principal:
+            AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+          Action: sts:AssumeRole
+        - Effect: Allow
+          Principal:
+            AWS: !GetAtt OpenSearchRoleMappingLambdaRole.Arn
+          Action: sts:AssumeRole
       Policies:
-        - PolicyName: OpenSearchAdminAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - es:ESHttpGet
-                  - es:ESHttpPost
-                  - es:ESHttpPut
-                  - es:ESHttpPatch
-                  - es:ESHttpDelete
-                  - es:ESHttpHead
-                  - es:DescribeDomain
-                Resource:
-                  - !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${StackPrefix}-${env}-aos'
-                  - !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${StackPrefix}-${env}-aos/*'
+      - PolicyName: OpenSearchAdminAccess
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - es:ESHttpGet
+            - es:ESHttpPost
+            - es:ESHttpPut
+            - es:ESHttpPatch
+            - es:ESHttpDelete
+            - es:ESHttpHead
+            - es:DescribeDomain
+            Resource:
+            - !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${StackPrefix}-${env}-aos'
+            - !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${StackPrefix}-${env}-aos/*'
 
   OpenSearchDomain:
     Type: AWS::OpenSearchService::Domain
     Properties:
       DomainName: !Sub '${StackPrefix}-${env}-aos'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       EngineVersion: OpenSearch_3.3
       ClusterConfig:
         InstanceType: r8g.large.search
@@ -1114,65 +1206,86 @@ Resources:
       AccessPolicies:
         Version: '2012-10-17'
         Statement:
-          - Effect: Allow
-            Principal:
-              AWS:
-                - !GetAtt ECSTaskRole.Arn
-                - !GetAtt SearchSimilarVideosTaskRole.Arn
-                - !GetAtt StoreEmbeddingsLambdaRole.Arn
-                - !GetAtt CreateSnapshotLambdaRole.Arn
-                - !GetAtt OpenSearchAdminRole.Arn
-                - !Sub 'arn:aws:iam::${AWS::AccountId}:root'
-            Action:
-              - es:ESHttpGet
-              - es:ESHttpPost
-              - es:ESHttpPut
-              - es:ESHttpDelete
-              - es:ESHttpHead
-            Resource: !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${StackPrefix}-${env}-aos/*'
+        - Effect: Allow
+          Principal:
+            AWS:
+            - !GetAtt ECSTaskRole.Arn
+            - !GetAtt SearchSimilarVideosTaskRole.Arn
+            - !GetAtt StoreEmbeddingsLambdaRole.Arn
+            - !GetAtt CreateSnapshotLambdaRole.Arn
+            - !GetAtt OpenSearchAdminRole.Arn
+            - !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+          Action:
+          - es:ESHttpGet
+          - es:ESHttpPost
+          - es:ESHttpPut
+          - es:ESHttpDelete
+          - es:ESHttpHead
+          Resource: !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${StackPrefix}-${env}-aos/*'
 
   ECSCluster:
     Type: AWS::ECS::Cluster
     Properties:
       ClusterName: !Sub '${StackPrefix}-${env}-cluster'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       ClusterSettings:
-        - Name: containerInsights
-          Value: enabled
+      - Name: containerInsights
+        Value: enabled
 
   VideoPreprocessingTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: !Sub '${StackPrefix}-${env}-video-preprocessing-task'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       RequiresCompatibilities:
-        - FARGATE
+      - FARGATE
       NetworkMode: awsvpc
       Cpu: '1024'
       Memory: '2048'
       ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
       TaskRoleArn: !GetAtt ECSTaskRole.Arn
       ContainerDefinitions:
-        - Name: !Sub '${StackPrefix}-${env}-video-preprocessor'
-          Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/video-preprocessing:latest'
-          Essential: true
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: !Sub '/ecs/${StackPrefix}-${env}-video-preprocessing'
-              awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: ecs
-              awslogs-create-group: 'true'
+      - Name: !Sub '${StackPrefix}-${env}-video-preprocessor'
+        Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/video-preprocessing:latest'
+        Essential: true
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Sub '/ecs/${StackPrefix}-${env}-video-preprocessing'
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: ecs
+            awslogs-create-group: 'true'
 
   SearchSimilarVideosTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     DependsOn:
-      - OpenSearchDomain
-      - ECRAPIVPCEndpoint
-      - ECRDKRVPCEndpoint
-      - S3VPCEndpoint
+    - OpenSearchDomain
+    - ECRAPIVPCEndpoint
+    - ECRDKRVPCEndpoint
+    - S3VPCEndpoint
     Properties:
       Family: !Sub '${StackPrefix}-${env}-search-similar-videos-task'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       RequiresCompatibilities:
-        - FARGATE
+      - FARGATE
       NetworkMode: awsvpc
       Cpu: '1024'
       Memory: '2048'
@@ -1182,50 +1295,64 @@ Resources:
         CpuArchitecture: X86_64
         OperatingSystemFamily: LINUX
       ContainerDefinitions:
-        - Name: !Sub '${StackPrefix}-${env}-search-similar-videos-container'
-          Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/condenast/search-similar-videos:latest'
-          Essential: true
-          PortMappings:
-            - ContainerPort: 8000
-              HostPort: 8000
-              Protocol: tcp
-              AppProtocol: http
-          Environment:
-            - Name: AWS_REGION
-              Value: !Ref AWS::Region
-            - Name: OPENSEARCH_CLUSTER_HOST
-              Value: !Sub 'https://${OpenSearchDomain.DomainEndpoint}'
-            - Name: AWS_S3_BUCKET
-              Value: !Sub 
-                - '${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}'
-                - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
-                  TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
-            - Name: PORT
-              Value: '8000'
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: !Sub '/ecs/${StackPrefix}-${env}-search-similar-videos-task'
-              awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: ecs
-              awslogs-create-group: 'true'
+      - Name: !Sub '${StackPrefix}-${env}-search-similar-videos-container'
+        Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/condenast/search-similar-videos:latest'
+        Essential: true
+        PortMappings:
+        - ContainerPort: 8000
+          HostPort: 8000
+          Protocol: tcp
+          AppProtocol: http
+        Environment:
+        - Name: AWS_REGION
+          Value: !Ref AWS::Region
+        - Name: OPENSEARCH_CLUSTER_HOST
+          Value: !Sub 'https://${OpenSearchDomain.DomainEndpoint}'
+        - Name: AWS_S3_BUCKET
+          Value: !Sub
+            - '${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}'
+            - VideoBucket: !FindInMap [ BucketNames, Video, BaseName ]
+              TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
+        - Name: PORT
+          Value: '8000'
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Sub '/ecs/${StackPrefix}-${env}-search-similar-videos-task'
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: ecs
+            awslogs-create-group: 'true'
 
   ApplicationLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
       Name: !Sub '${StackPrefix}-${env}-alb'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       Scheme: internet-facing
       Type: application
       Subnets:
-        - !Ref PublicSubnet1
-        - !Ref PublicSubnet2
+      - !Ref PublicSubnet1
+      - !Ref PublicSubnet2
       SecurityGroups:
-        - !Ref ALBSecurityGroup
+      - !Ref ALBSecurityGroup
 
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
       Name: !Sub '${StackPrefix}-${env}-tg'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       Protocol: HTTP
       Port: 8000
       TargetType: ip
@@ -1244,16 +1371,23 @@ Resources:
       Port: 8000
       Protocol: HTTP
       DefaultActions:
-        - Type: forward
-          TargetGroupArn: !Ref TargetGroup
+      - Type: forward
+        TargetGroupArn: !Ref TargetGroup
 
   ECSService:
     Type: AWS::ECS::Service
     DependsOn:
-      - ALBListener
-      - OpenSearchRoleMappingCustomResource
+    - ALBListener
+    - OpenSearchRoleMappingCustomResource
     Properties:
       ServiceName: !Sub '${StackPrefix}-${env}-service'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       Cluster: !Ref ECSCluster
       TaskDefinition: !Ref SearchSimilarVideosTaskDefinition
       DesiredCount: 1
@@ -1261,26 +1395,26 @@ Resources:
       NetworkConfiguration:
         AwsvpcConfiguration:
           Subnets:
-            - !Ref PrivateSubnet1
-            - !Ref PrivateSubnet2
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
           SecurityGroups:
-            - !Ref ECSSecurityGroup
+          - !Ref ECSSecurityGroup
           AssignPublicIp: DISABLED
       LoadBalancers:
-        - ContainerName: !Sub '${StackPrefix}-${env}-search-similar-videos-container'
-          ContainerPort: 8000
-          TargetGroupArn: !Ref TargetGroup
+      - ContainerName: !Sub '${StackPrefix}-${env}-search-similar-videos-container'
+        ContainerPort: 8000
+        TargetGroupArn: !Ref TargetGroup
       HealthCheckGracePeriodSeconds: 60
 
   AutoScalingTarget:
     Type: AWS::ApplicationAutoScaling::ScalableTarget
+    DependsOn: ECSService
     Properties:
       MaxCapacity: 4
       MinCapacity: 1
-      ResourceId: !Sub 'service/${ECSCluster}/${ECSService.Name}'
+      ResourceId: !Sub 'service/${ECSCluster}/${StackPrefix}-${env}-service'
       ScalableDimension: ecs:service:DesiredCount
       ServiceNamespace: ecs
-      RoleARN: !Sub 'arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService'
 
   AutoScalingPolicy:
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
@@ -1300,6 +1434,13 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub '${StackPrefix}-${env}-invoke-bedrock-marengo'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       Runtime: python3.13
       Handler: index.lambda_handler
       Timeout: 300
@@ -1311,10 +1452,10 @@ Resources:
           OUTPUT_BUCKET: !Sub '${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
       VpcConfig:
         SubnetIds:
-          - !Ref PrivateSubnet1
-          - !Ref PrivateSubnet2
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
         SecurityGroupIds:
-          - !Ref LambdaSecurityGroup
+        - !Ref LambdaSecurityGroup
       Code:
         ZipFile: |
           import json
@@ -1377,12 +1518,12 @@ Resources:
     Properties:
       LayerName: !Sub '${StackPrefix}-${env}-opensearch-dependencies'
       CompatibleRuntimes:
-        - python3.13
+      - python3.13
       Content:
-        S3Bucket: !Sub 
+        S3Bucket: !Sub
           - '${env}-${FrontendBucket}-${TargetAccountId}'
-          - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
-            TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
+          - FrontendBucket: !FindInMap [ EnvironmentConfig, !Ref env, BucketBaseName ]
+            TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
         S3Key: demo-apps-assets/video-search-demo/lambda-artifacts/opensearch-query-dependencies-2fb22b80-caf2-4d3f-84a6-3f863bf3c409.zip
 
   FfmpegVideoProcessingDependenciesLayer:
@@ -1390,44 +1531,51 @@ Resources:
     Properties:
       LayerName: !Sub '${StackPrefix}-${env}-ffmpeg-video-processing-dependencies'
       CompatibleRuntimes:
-        - python3.13
+      - python3.13
       Content:
-        S3Bucket: !Sub 
+        S3Bucket: !Sub
           - '${env}-${FrontendBucket}-${TargetAccountId}'
-          - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
-            TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
+          - FrontendBucket: !FindInMap [ EnvironmentConfig, !Ref env, BucketBaseName ]
+            TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
         S3Key: demo-apps-assets/video-search-demo/lambda-artifacts/ffmpeg-video-processing-dependencies-697fac5e-fb3f-4814-b610-f0d2d3812616.zip
 
   StoreEmbeddingsFunction:
     Type: AWS::Lambda::Function
     DependsOn:
-      - OpenSearchDomain
-      - OpenSearchRoleMappingCustomResource
+    - OpenSearchDomain
+    - OpenSearchRoleMappingCustomResource
     Properties:
       FunctionName: !Sub '${StackPrefix}-${env}-store-embeddings-opensearch'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       Runtime: python3.13
       Handler: store_embeddings.lambda_handler
       Timeout: 900
       MemorySize: 512
       Role: !GetAtt StoreEmbeddingsLambdaRole.Arn
       Layers:
-        - !Ref OpenSearchDependenciesLayer
-        - !Ref FfmpegVideoProcessingDependenciesLayer
+      - !Ref OpenSearchDependenciesLayer
+      - !Ref FfmpegVideoProcessingDependenciesLayer
       Environment:
         Variables:
           OPENSEARCH_CLUSTER_HOST: !Sub 'https://${OpenSearchDomain.DomainEndpoint}'
           THUMBNAIL_BUCKET: !Sub '${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
       VpcConfig:
         SubnetIds:
-          - !Ref PrivateSubnet1
-          - !Ref PrivateSubnet2
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
         SecurityGroupIds:
-          - !Ref LambdaSecurityGroup
+        - !Ref LambdaSecurityGroup
       Code:
-        S3Bucket: !Sub 
+        S3Bucket: !Sub
           - '${env}-${FrontendBucket}-${TargetAccountId}'
-          - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
-            TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
+          - FrontendBucket: !FindInMap [ EnvironmentConfig, !Ref env, BucketBaseName ]
+            TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
         S3Key: 'demo-apps-assets/video-search-demo/lambda-artifacts/store-embeddings-lambda.zip'
       EphemeralStorage:
         Size: 2048
@@ -1436,6 +1584,13 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub '${StackPrefix}-${env}-invoke-video-processing-step-function'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       Runtime: python3.13
       Handler: index.lambda_handler
       Timeout: 60
@@ -1444,10 +1599,10 @@ Resources:
       Environment:
         Variables:
           STATE_MACHINE_ARN: !Ref VideoProcessingStateMachine
-          VIDEO_BUCKET: !Sub 
+          VIDEO_BUCKET: !Sub
             - '${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}'
-            - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
-              TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
+            - VideoBucket: !FindInMap [ BucketNames, Video, BaseName ]
+              TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
           OUTPUT_BUCKET: !Sub '${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
       Code:
         ZipFile: |
@@ -1491,37 +1646,44 @@ Resources:
     Type: AWS::S3::Bucket
     DeletionPolicy: Delete
     DependsOn:
-      - InvokeStepFunctionPermissionFromS3  # ← ADD THIS
+    - InvokeStepFunctionPermissionFromS3 # ← ADD THIS
     Properties:
-      BucketName: !Sub 
+      BucketName: !Sub
         - '${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}'
-        - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
+        - VideoBucket: !FindInMap [ BucketNames, Video, BaseName ]
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       CorsConfiguration:
         CorsRules:
-          - AllowedOrigins:
-              - '*'
-            AllowedMethods:
-              - GET
-              - PUT
-              - POST
-              - DELETE
-              - HEAD
-            AllowedHeaders:
-              - '*'
-            ExposedHeaders:
-              - ETag
-              - x-amz-request-id
-              - x-amz-id-2
-            MaxAge: 3600
+        - AllowedOrigins:
+          - '*'
+          AllowedMethods:
+          - GET
+          - PUT
+          - POST
+          - DELETE
+          - HEAD
+          AllowedHeaders:
+          - '*'
+          ExposedHeaders:
+          - ETag
+          - x-amz-request-id
+          - x-amz-id-2
+          MaxAge: 3600
       NotificationConfiguration:
         LambdaConfigurations:
-          - Event: s3:ObjectCreated:*
-            Function: !GetAtt InvokeStepFunctionFunction.Arn
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: suffix
-                    Value: .mp4
+        - Event: s3:ObjectCreated:*
+          Function: !GetAtt InvokeStepFunctionFunction.Arn
+          Filter:
+            S3Key:
+              Rules:
+              - Name: suffix
+                Value: .mp4
 
   # ============ OUTPUT VIDEO BUCKET (for processed videos and thumbnails) ============
   OutputVideoBucket:
@@ -1529,23 +1691,30 @@ Resources:
     DeletionPolicy: Delete
     Properties:
       BucketName: !Sub '${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       CorsConfiguration:
         CorsRules:
-          - AllowedOrigins:
-              - '*'
-            AllowedMethods:
-              - GET
-              - PUT
-              - POST
-              - DELETE
-              - HEAD
-            AllowedHeaders:
-              - '*'
-            ExposedHeaders:
-              - ETag
-              - x-amz-request-id
-              - x-amz-id-2
-            MaxAge: 3600
+        - AllowedOrigins:
+          - '*'
+          AllowedMethods:
+          - GET
+          - PUT
+          - POST
+          - DELETE
+          - HEAD
+          AllowedHeaders:
+          - '*'
+          ExposedHeaders:
+          - ETag
+          - x-amz-request-id
+          - x-amz-id-2
+          MaxAge: 3600
 
   # ============ S3 BUCKET POLICY FOR BEDROCK ACCESS ============
   OutputVideoBucketPolicy:
@@ -1555,74 +1724,88 @@ Resources:
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Sid: AllowBedrockBucketLevelAccess
-            Effect: Allow
-            Principal:
-              Service: bedrock.amazonaws.com
-            Action:
-              - s3:GetBucketLocation
-              - s3:ListBucket
-            Resource: !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
-            Condition:
-              StringEquals:
-                aws:SourceAccount: !Ref AWS::AccountId
-          
-          - Sid: AllowBedrockObjectLevelAccess
-            Effect: Allow
-            Principal:
-              Service: bedrock.amazonaws.com
-            Action:
-              - s3:GetObject      # Bedrock reads the input video
-              - s3:PutObject      # Bedrock writes embeddings
-            Resource: !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'  # ✅ ADD /*
-            Condition:
-              StringEquals:
-                aws:SourceAccount: !Ref AWS::AccountId
+        - Sid: AllowBedrockBucketLevelAccess
+          Effect: Allow
+          Principal:
+            Service: bedrock.amazonaws.com
+          Action:
+          - s3:GetBucketLocation
+          - s3:ListBucket
+          Resource: !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
+          Condition:
+            StringEquals:
+              aws:SourceAccount: !Ref AWS::AccountId
+
+        - Sid: AllowBedrockObjectLevelAccess
+          Effect: Allow
+          Principal:
+            Service: bedrock.amazonaws.com
+          Action:
+          - s3:GetObject # Bedrock reads the input video
+          - s3:PutObject # Bedrock writes embeddings
+          Resource: !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*' # ✅ ADD /*
+          Condition:
+            StringEquals:
+              aws:SourceAccount: !Ref AWS::AccountId
 
   # ============ S3 BUCKET AUTO-DELETION RESOURCES ============
   EmptyBucketLambdaRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub '${StackPrefix}-${env}-empty-bucket-lambda-role'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - PolicyName: S3BucketEmptyAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:ListBucket
-                  - s3:ListBucketVersions
-                Resource: 
-                  - !Sub 
-                    - 'arn:aws:s3:::${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}'
-                    - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
-                      TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
-                  - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
-              - Effect: Allow
-                Action:
-                  - s3:DeleteObject
-                  - s3:DeleteObjectVersion
-                Resource: 
-                  - !Sub 
-                    - 'arn:aws:s3:::${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}/*'
-                    - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
-                      TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
-                  - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'
+      - PolicyName: S3BucketEmptyAccess
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - s3:ListBucket
+            - s3:ListBucketVersions
+            Resource:
+            - !Sub
+              - 'arn:aws:s3:::${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}'
+              - VideoBucket: !FindInMap [ BucketNames, Video, BaseName ]
+                TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
+            - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
+          - Effect: Allow
+            Action:
+            - s3:DeleteObject
+            - s3:DeleteObjectVersion
+            Resource:
+            - !Sub
+              - 'arn:aws:s3:::${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}/*'
+              - VideoBucket: !FindInMap [ BucketNames, Video, BaseName ]
+                TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
+            - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'
 
   EmptyBucketFunction:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub '${StackPrefix}-${env}-empty-bucket'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       Runtime: python3.13
       Handler: index.lambda_handler
       Timeout: 900
@@ -1634,12 +1817,12 @@ Resources:
           import boto3
           import cfnresponse
           import logging
-          
+
           logger = logging.getLogger()
           logger.setLevel(logging.INFO)
-          
+
           s3 = boto3.client('s3')
-          
+
           def lambda_handler(event, context):
               """Empty S3 bucket on CloudFormation Delete event"""
               logger.info(f"Event: {json.dumps(event)}")
@@ -1662,7 +1845,7 @@ Resources:
                   import traceback
                   traceback.print_exc()
                   cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
-          
+
           def empty_bucket(bucket_name):
               """Delete all objects and versions from the bucket"""
               try:
@@ -1735,18 +1918,25 @@ Resources:
       FunctionName: !GetAtt InvokeStepFunctionFunction.Arn
       Action: lambda:InvokeFunction
       Principal: s3.amazonaws.com
-      SourceArn: !Sub 
+      SourceArn: !Sub
         - 'arn:aws:s3:::${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}'
-        - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
+        - VideoBucket: !FindInMap [ BucketNames, Video, BaseName ]
       SourceAccount: !Ref AWS::AccountId
 
   CreateSnapshotFunction:
     Type: AWS::Lambda::Function
     DependsOn:
-      - OpenSearchDomain
-      - OpenSearchRoleMappingCustomResource
+    - OpenSearchDomain
+    - OpenSearchRoleMappingCustomResource
     Properties:
       FunctionName: !Sub '${StackPrefix}-${env}-create-opensearch-snapshot'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       Runtime: python3.12
       Handler: index.lambda_handler
       Timeout: 300
@@ -1756,21 +1946,21 @@ Resources:
         Variables:
           OPENSEARCH_CLUSTER_HOST: !Sub 'https://${OpenSearchDomain.DomainEndpoint}'
           SNAPSHOT_ROLE_ARN: !GetAtt OpenSearchSnapshotRole.Arn
-          S3_BUCKET: !Sub 
+          S3_BUCKET: !Sub
             - '${env}-${FrontendBucket}-${TargetAccountId}'
-            - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
-              TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
+            - FrontendBucket: !FindInMap [ EnvironmentConfig, !Ref env, BucketBaseName ]
+              TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
           REPO_NAME: !Sub '${StackPrefix}-${env}-snapshot-repo'
-          
+
       Layers:
-        - !Sub 'arn:aws:lambda:${AWS::Region}:770693421928:layer:Klayers-p312-requests:18'
+      - !Sub 'arn:aws:lambda:${AWS::Region}:770693421928:layer:Klayers-p312-requests:18'
 
       VpcConfig:
         SubnetIds:
-          - !Ref PrivateSubnet1
-          - !Ref PrivateSubnet2
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
         SecurityGroupIds:
-          - !Ref LambdaSecurityGroup
+        - !Ref LambdaSecurityGroup
       Code:
         ZipFile: |
           import boto3
@@ -1847,6 +2037,13 @@ Resources:
     DependsOn: OpenSearchDomain
     Properties:
       FunctionName: !Sub '${StackPrefix}-${env}-opensearch-role-mapper'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       Runtime: python3.11
       Handler: index.lambda_handler
       Timeout: 60
@@ -1860,10 +2057,10 @@ Resources:
           import os
           from botocore.auth import SigV4Auth
           from botocore.awsrequest import AWSRequest
-          
+
           http = urllib3.PoolManager()
           sts = boto3.client('sts')
-          
+
           def send_response(event, context, status, data=None):
               """Send response to CloudFormation"""
               response_body = {
@@ -1884,7 +2081,7 @@ Resources:
                   )
               except Exception as e:
                   print(f"Failed to send response: {str(e)}")
-          
+
           def lambda_handler(event, context):
               """Maps IAM roles to OpenSearch internal roles"""
               print(f"Event: {json.dumps(event)}")
@@ -2018,6 +2215,13 @@ Resources:
   FrontendDistribution:
     Type: AWS::CloudFront::Distribution
     Properties:
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       DistributionConfig:
         Enabled: true
         DefaultRootObject: index.html
@@ -2028,68 +2232,82 @@ Resources:
           ViewerProtocolPolicy: redirect-to-https
           CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # AWS "CachingOptimized"
         Origins:
-          - Id: FrontendS3Origin
-            DomainName: !Sub 
-              - '${env}-${FrontendBucket}-${TargetAccountId}.s3.${AWS::Region}.${AWS::URLSuffix}'
-              - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
-                TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
-            OriginAccessControlId: !GetAtt FrontendOAC.Id
-            OriginPath: '/demo-apps-assets/video-search-demo/FE'
-            S3OriginConfig:
-              OriginAccessIdentity: ""
+        - Id: FrontendS3Origin
+          DomainName: !Sub
+            - '${env}-${FrontendBucket}-${TargetAccountId}.s3.${AWS::Region}.${AWS::URLSuffix}'
+            - FrontendBucket: !FindInMap [ EnvironmentConfig, !Ref env, BucketBaseName ]
+              TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
+          OriginAccessControlId: !GetAtt FrontendOAC.Id
+          OriginPath: '/demo-apps-assets/video-search-demo/FE'
+          S3OriginConfig:
+            OriginAccessIdentity: ""
 
   # Lambda Role for managing bucket policy
   ManageBucketPolicyLambdaRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub '${StackPrefix}-${env}-manage-bucket-policy-role'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - PolicyName: S3BucketPolicyAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:PutBucketPolicy
-                  - s3:GetBucketPolicy
-                  - s3:DeleteBucketPolicy
-                Resource: !Sub 
-                  - 'arn:aws:s3:::${env}-${FrontendBucket}-${TargetAccountId}'
-                  - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
-                    TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
-        - PolicyName: !Sub '${StackPrefix}-AllowAssumeCrossAccountRole'
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: sts:AssumeRole
-                Resource: !Sub 
-                  - 'arn:aws:iam::${TargetAccountId}:role/CrossAccountS3PolicyUpdater'
-                  - TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
+      - PolicyName: S3BucketPolicyAccess
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - s3:PutBucketPolicy
+            - s3:GetBucketPolicy
+            - s3:DeleteBucketPolicy
+            Resource: !Sub
+              - 'arn:aws:s3:::${env}-${FrontendBucket}-${TargetAccountId}'
+              - FrontendBucket: !FindInMap [ EnvironmentConfig, !Ref env, BucketBaseName ]
+                TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
+      - PolicyName: !Sub '${StackPrefix}-AllowAssumeCrossAccountRole'
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Resource: !Sub
+              - 'arn:aws:iam::${TargetAccountId}:role/CrossAccountS3PolicyUpdater'
+              - TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
 
   # Lambda Function for managing bucket policy
   ManageBucketPolicyFunction:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub '${StackPrefix}-${env}-manage-bucket-policy'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       Runtime: python3.13
       Handler: index.handler
       Role: !GetAtt ManageBucketPolicyLambdaRole.Arn
       Timeout: 60
       Environment:
         Variables:
-          CROSS_ACCOUNT_ROLE_ARN: !Sub 
+          CROSS_ACCOUNT_ROLE_ARN: !Sub
             - 'arn:aws:iam::${TargetAccountId}:role/CrossAccountS3PolicyUpdater'
-            - TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
+            - TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
       Code:
         ZipFile: |
           import json
@@ -2097,9 +2315,9 @@ Resources:
           import urllib3
           import os
           from botocore.exceptions import ClientError
-          
+
           http = urllib3.PoolManager()
-          
+
           def get_s3_client():
               """Get S3 client by assuming cross-account role"""
               role_arn = os.environ['CROSS_ACCOUNT_ROLE_ARN']
@@ -2120,7 +2338,7 @@ Resources:
               except Exception as e:
                   print(f"Error assuming role {role_arn}: {str(e)}")
                   raise
-          
+
           def send(event, context, status, data):
               """Send CloudFormation response"""
               response = {
@@ -2138,7 +2356,7 @@ Resources:
                   body=json.dumps(response).encode("utf-8"),
                   headers={"Content-Type": ""}
               )
-          
+
           def handler(event, context):
               try:
                   print(f"Event: {json.dumps(event)}")
@@ -2146,10 +2364,10 @@ Resources:
                   bucket = props["BucketName"]
                   dist_arn = props["DistributionArn"]
                   sid = props["StackPrefix"]
-          
+
                   # Get S3 client via cross-account role
                   s3 = get_s3_client()
-          
+
                   # Get existing policy
                   try:
                       res = s3.get_bucket_policy(Bucket=bucket)
@@ -2159,7 +2377,7 @@ Resources:
                           policy = {"Version": "2012-10-17", "Statement": []}
                       else:
                           raise
-          
+
                   if event["RequestType"] in ["Create", "Update"]:
                       # Add or update policy statement
                       if not any(s.get("Sid") == sid for s in policy["Statement"]):
@@ -2173,19 +2391,19 @@ Resources:
                           })
                           s3.put_bucket_policy(Bucket=bucket, Policy=json.dumps(policy))
                       print("Bucket policy successfully updated via AssumeRole")
-          
+
                   elif event["RequestType"] == "Delete":
                       # Remove policy statement
                       original_len = len(policy["Statement"])
                       policy["Statement"] = [s for s in policy["Statement"] if s.get("Sid") != sid]
-          
+
                       if len(policy["Statement"]) != original_len:
                           if policy["Statement"]:
                               s3.put_bucket_policy(Bucket=bucket, Policy=json.dumps(policy))
                           else:
                               s3.delete_bucket_policy(Bucket=bucket)
                       print("Bucket policy successfully cleaned up via AssumeRole")
-          
+
                   send(event, context, "SUCCESS", {})
               except Exception as e:
                   print(f"Error: {str(e)}")
@@ -2196,10 +2414,10 @@ Resources:
     Type: Custom::S3BucketPolicy
     Properties:
       ServiceToken: !GetAtt ManageBucketPolicyFunction.Arn
-      BucketName: !Sub 
+      BucketName: !Sub
         - '${env}-${FrontendBucket}-${TargetAccountId}'
-        - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
-          TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
+        - FrontendBucket: !FindInMap [ EnvironmentConfig, !Ref env, BucketBaseName ]
+          TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
       DistributionArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}'
       StackPrefix: !Sub '${env}-${StackPrefix}'
 
@@ -2207,6 +2425,13 @@ Resources:
     Type: AWS::CloudFront::Distribution
     DependsOn: ApplicationLoadBalancer
     Properties:
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       DistributionConfig:
         Enabled: true
         HttpVersion: http2
@@ -2214,25 +2439,32 @@ Resources:
         DefaultCacheBehavior:
           TargetOriginId: ApiOrigin
           ViewerProtocolPolicy: https-only
-          AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+          AllowedMethods: [ GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE ]
           CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
           OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3
         Origins:
-          - Id: ApiOrigin
-            DomainName: !GetAtt ApplicationLoadBalancer.DNSName
-            CustomOriginConfig:
-              OriginProtocolPolicy: http-only
-              HTTPPort: 8000
-              HTTPSPort: 443
+        - Id: ApiOrigin
+          DomainName: !GetAtt ApplicationLoadBalancer.DNSName
+          CustomOriginConfig:
+            OriginProtocolPolicy: http-only
+            HTTPPort: 8000
+            HTTPSPort: 443
 
   # ============ NEW LAMBDA FUNCTION FOR FRONTEND CONFIG UPDATE ============
   UpdateFrontendConfigLambda:
     Type: AWS::Lambda::Function
     DependsOn:
-      - ApplicationLoadBalancer
-      - ECSService
+    - ApplicationLoadBalancer
+    - ECSService
     Properties:
       FunctionName: !Sub '${StackPrefix}-${env}-update-frontend-config'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       Runtime: python3.11
       Handler: index.lambda_handler
       Timeout: 60
@@ -2240,10 +2472,10 @@ Resources:
       Role: !GetAtt UpdateFrontendConfigLambdaRole.Arn
       Environment:
         Variables:
-          FRONTEND_S3_BUCKET: !Sub 
+          FRONTEND_S3_BUCKET: !Sub
             - '${env}-${FrontendBucket}-${TargetAccountId}'
-            - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
-              TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
+            - FrontendBucket: !FindInMap [ EnvironmentConfig, !Ref env, BucketBaseName ]
+              TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
       Code:
         ZipFile: |
           import json
@@ -2251,10 +2483,10 @@ Resources:
           import urllib3
           from datetime import datetime
           import os
-          
+
           http = urllib3.PoolManager()
           s3 = boto3.client('s3')
-          
+
           def send_response(event, context, status, data=None):
               """Send response to CloudFormation"""
               response_body = {
@@ -2275,7 +2507,7 @@ Resources:
                   )
               except Exception as e:
                   print(f"Failed to send response: {str(e)}")
-          
+
           def lambda_handler(event, context):
               """Update frontend config.json and call demo completion API"""
               print(f"Event: {json.dumps(event)}")
@@ -2389,37 +2621,37 @@ Resources:
   OpenSearchRoleMappingCustomResource:
     Type: Custom::OpenSearchRoleMapping
     DependsOn:
-      - OpenSearchDomain
-      - OpenSearchRoleMappingLambda
-      - StoreEmbeddingsLambdaRole
-      - CreateSnapshotLambdaRole
-      - SearchSimilarVideosTaskRole
+    - OpenSearchDomain
+    - OpenSearchRoleMappingLambda
+    - StoreEmbeddingsLambdaRole
+    - CreateSnapshotLambdaRole
+    - SearchSimilarVideosTaskRole
     Properties:
       ServiceToken: !GetAtt OpenSearchRoleMappingLambda.Arn
       DomainEndpoint: !GetAtt OpenSearchDomain.DomainEndpoint
       AdminRoleArn: !GetAtt OpenSearchAdminRole.Arn
       RoleMappings:
         all_access:
-          - !GetAtt StoreEmbeddingsLambdaRole.Arn
-          - !GetAtt CreateSnapshotLambdaRole.Arn
-          - !GetAtt SearchSimilarVideosTaskRole.Arn
-          - !GetAtt ECSTaskRole.Arn
-          - !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+        - !GetAtt StoreEmbeddingsLambdaRole.Arn
+        - !GetAtt CreateSnapshotLambdaRole.Arn
+        - !GetAtt SearchSimilarVideosTaskRole.Arn
+        - !GetAtt ECSTaskRole.Arn
+        - !Sub 'arn:aws:iam::${AWS::AccountId}:root'
 
   # ============ NEW CUSTOM RESOURCE FOR FRONTEND CONFIG UPDATE ============
   UpdateFrontendConfigCustomResource:
     Type: Custom::UpdateFrontendConfig
     DependsOn:
-      - ECSService
-      - ApplicationLoadBalancer
-      - UpdateFrontendConfigLambda
-      - ApiDistribution
+    - ECSService
+    - ApplicationLoadBalancer
+    - UpdateFrontendConfigLambda
+    - ApiDistribution
     Properties:
       ServiceToken: !GetAtt UpdateFrontendConfigLambda.Arn
-      FrontendBucket: !Sub 
+      FrontendBucket: !Sub
         - '${env}-${FrontendBucket}-${TargetAccountId}'
-        - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
-          TargetAccountId: !FindInMap [EnvironmentConfig, !Ref env, AccountId]
+        - FrontendBucket: !FindInMap [ EnvironmentConfig, !Ref env, BucketBaseName ]
+          TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
       ApiBaseUrl: !Sub 'https://${ApiDistribution.DomainName}'
       Trigger: !Sub '${AWS::StackName}-${ApplicationLoadBalancer}'
 
@@ -2440,10 +2672,17 @@ Resources:
   VideoProcessingStateMachine:
     Type: AWS::StepFunctions::StateMachine
     DependsOn:
-      - InvokeBedrockMarengoFunction
-      - StoreEmbeddingsFunction
+    - InvokeBedrockMarengoFunction
+    - StoreEmbeddingsFunction
     Properties:
       StateMachineName: !Sub '${StackPrefix}-${env}-pipeline'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
       RoleArn: !GetAtt StepFunctionsExecutionRole.Arn
       DefinitionString: !Sub |
         {
@@ -2589,7 +2828,178 @@ Resources:
             }
           }
         }
-        
+
+  # ============ VIDEO UPLOAD LAMBDA ROLE ============
+  UploadVideosLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${StackPrefix}-${env}-upload-videos-role'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+      - PolicyName: S3Access
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - s3:PutObject
+            - s3:CopyObject
+            - s3:GetObject
+            - s3:ListBucket
+            Resource:
+            - !Sub
+              - 'arn:aws:s3:::${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}/*'
+              - VideoBucket: !FindInMap [ BucketNames, Video, BaseName ]
+            - !Sub
+              - 'arn:aws:s3:::${env}-${FrontendBucket}-${TargetAccountId}/*'
+              - FrontendBucket: !FindInMap [ EnvironmentConfig, !Ref env, BucketBaseName ]
+                TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
+            - !Sub
+              - 'arn:aws:s3:::${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}'
+              - VideoBucket: !FindInMap [ BucketNames, Video, BaseName ]
+            - !Sub
+              - 'arn:aws:s3:::${env}-${FrontendBucket}-${TargetAccountId}'
+              - FrontendBucket: !FindInMap [ EnvironmentConfig, !Ref env, BucketBaseName ]
+                TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
+
+  # ============ VIDEO UPLOAD LAMBDA FUNCTION ============
+  UploadVideosFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${StackPrefix}-${env}-upload-videos'
+      Tags:
+      - Key: Project
+        Value: !Sub '${env}-videoSearchDemo-${StackPrefix}'
+      - Key: Environment
+        Value: !Ref env
+      - Key: StackPrefix
+        Value: !Ref StackPrefix
+      Runtime: python3.13
+      Handler: index.lambda_handler
+      Timeout: 300
+      MemorySize: 512
+      Role: !GetAtt UploadVideosLambdaRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import urllib3
+          import time
+
+          http = urllib3.PoolManager()
+          s3 = boto3.client('s3')
+
+          def send_response(event, context, status, data=None):
+              response_body = {
+                  'Status': status,
+                  'PhysicalResourceId': event.get('PhysicalResourceId', 'UploadVideos'),
+                  'StackId': event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'Data': data or {}
+              }
+              try:
+                  http.request('PUT', event['ResponseURL'], 
+                      body=json.dumps(response_body),
+                      headers={'Content-Type': 'application/json'})
+              except Exception as e:
+                  print(f"Failed to send response: {str(e)}")
+
+          def lambda_handler(event, context):
+              print(f"Event: {json.dumps(event)}")
+              
+              try:
+                  if event['RequestType'] == 'Delete':
+                      send_response(event, context, 'SUCCESS')
+                      return
+                  
+                  props = event['ResourceProperties']
+                  target_bucket = props['TargetBucket']
+                  source_bucket = props.get('SourceBucket')
+                  source_prefix = props.get('SourcePrefix', '')
+                  videos = props.get('Videos', [])
+                  
+                  uploaded = []
+                  
+                  # Copy from source bucket if specified
+                  if source_bucket and source_prefix:
+                      print(f"Copying videos from s3://{source_bucket}/{source_prefix}")
+                      paginator = s3.get_paginator('list_objects_v2')
+                      for page in paginator.paginate(Bucket=source_bucket, Prefix=source_prefix):
+                          for obj in page.get('Contents', []):
+                              key = obj['Key']
+                              if key.lower().endswith(('.mp4', '.mov', '.avi')):
+                                  filename = key.split('/')[-1]
+                                  s3.copy_object(
+                                      CopySource={'Bucket': source_bucket, 'Key': key},
+                                      Bucket=target_bucket,
+                                      Key=filename
+                                  )
+                                  uploaded.append(filename)
+                                  print(f"Copied: {filename}")
+                  
+                  time.sleep(120)
+
+                  # Copy specific videos
+                  for video in videos:
+                      src_bucket = video['Bucket']
+                      src_key = video['Key']
+                      dest_key = video.get('DestKey', src_key.split('/')[-1])
+                      
+                      s3.copy_object(
+                          CopySource={'Bucket': src_bucket, 'Key': src_key},
+                          Bucket=target_bucket,
+                          Key=dest_key
+                      )
+                      uploaded.append(dest_key)
+                      print(f"Copied: {dest_key}")
+                  
+                  send_response(event, context, 'SUCCESS', {
+                      'VideosUploaded': len(uploaded),
+                      'Files': uploaded
+                  })
+                  
+              except Exception as e:
+                  print(f"Error: {str(e)}")
+                  import traceback
+                  traceback.print_exc()
+                  send_response(event, context, 'FAILED', {'Error': str(e)})
+
+  # ============ CUSTOM RESOURCE TO UPLOAD VIDEOS ============
+  UploadVideosCustomResource:
+    Type: Custom::UploadVideos
+    DependsOn:
+    - VideoBucket
+    - VideoProcessingStateMachine
+    - ECSService
+    - OpenSearchDomain
+    Properties:
+      ServiceToken: !GetAtt UploadVideosFunction.Arn
+      TargetBucket: !Sub
+        - '${StackPrefix}-${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}'
+        - VideoBucket: !FindInMap [ BucketNames, Video, BaseName ]
+      SourceBucket: !Sub
+        - '${env}-${FrontendBucket}-${TargetAccountId}'
+        - FrontendBucket: !FindInMap [ EnvironmentConfig, !Ref env, BucketBaseName ]
+          TargetAccountId: !FindInMap [ EnvironmentConfig, !Ref env, AccountId ]
+      SourcePrefix: 'demo-apps-assets/video-search-demo/sample-videos/'
+      Videos: []
+
 Outputs:
   CloudFrontURL:
     Description: CloudFront URL for the frontend
