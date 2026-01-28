@@ -108,8 +108,22 @@ jobs:
       - name: Validate CloudFormation template
         run: |
           echo "🔍 Validating backend CloudFormation template..."
+          
+          # Upload template to S3 for validation (templates over 51KB need S3)
+          TEMPLATE_BUCKET="aws-cloudformation-templates-$(aws sts get-caller-identity --query Account --output text)-${{ env.AWS_REGION }}"
+          TEMPLATE_KEY="video-search-backend-$(date +%s).yaml"
+          
+          # Create bucket if it doesn't exist
+          aws s3 mb "s3://${TEMPLATE_BUCKET}" --region "${{ env.AWS_REGION }}" 2>/dev/null || true
+          
+          # Upload template
+          aws s3 cp video-search-cloudformation-stack.yaml "s3://${TEMPLATE_BUCKET}/${TEMPLATE_KEY}"
+          
+          # Validate using S3 URL
           aws cloudformation validate-template \
-            --template-body file://video-search-cloudformation-stack.yaml
+            --template-url "https://${TEMPLATE_BUCKET}.s3.${{ env.AWS_REGION }}.amazonaws.com/${TEMPLATE_KEY}"
+          
+          echo "✅ Backend template validation passed"
 
       - name: Deploy backend infrastructure
         run: |
@@ -118,6 +132,17 @@ jobs:
           echo "Environment: ${{ env.ENVIRONMENT }}"
           echo "Region: ${{ env.AWS_REGION }}"
           
+          # Upload template to S3 for deployment (templates over 51KB need S3)
+          TEMPLATE_BUCKET="aws-cloudformation-templates-$(aws sts get-caller-identity --query Account --output text)-${{ env.AWS_REGION }}"
+          TEMPLATE_KEY="video-search-backend-$(date +%s).yaml"
+          
+          # Create bucket if it doesn't exist
+          aws s3 mb "s3://${TEMPLATE_BUCKET}" --region "${{ env.AWS_REGION }}" 2>/dev/null || true
+          
+          # Upload template
+          aws s3 cp video-search-cloudformation-stack.yaml "s3://${TEMPLATE_BUCKET}/${TEMPLATE_KEY}"
+          TEMPLATE_URL="https://${TEMPLATE_BUCKET}.s3.${{ env.AWS_REGION }}.amazonaws.com/${TEMPLATE_KEY}"
+          
           # Check if stack exists
           if aws cloudformation describe-stacks \
             --stack-name "${{ needs.validate-inputs.outputs.backend_stack_name }}" \
@@ -125,7 +150,7 @@ jobs:
             echo "📝 Stack exists, updating..."
             aws cloudformation update-stack \
               --stack-name "${{ needs.validate-inputs.outputs.backend_stack_name }}" \
-              --template-body file://video-search-cloudformation-stack.yaml \
+              --template-url "${TEMPLATE_URL}" \
               --parameters \
                 ParameterKey=env,ParameterValue="${{ env.ENVIRONMENT }}" \
                 ParameterKey=StackPrefix,ParameterValue="${{ env.STACK_PREFIX }}" \
@@ -142,7 +167,7 @@ jobs:
             echo "🆕 Creating new stack..."
             aws cloudformation create-stack \
               --stack-name "${{ needs.validate-inputs.outputs.backend_stack_name }}" \
-              --template-body file://video-search-cloudformation-stack.yaml \
+              --template-url "${TEMPLATE_URL}" \
               --parameters \
                 ParameterKey=env,ParameterValue="${{ env.ENVIRONMENT }}" \
                 ParameterKey=StackPrefix,ParameterValue="${{ env.STACK_PREFIX }}" \
