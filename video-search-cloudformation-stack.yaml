@@ -1845,7 +1845,6 @@ Resources:
     Type: AWS::Lambda::Function
     DependsOn:
     - OpenSearchDomain
-    - OpenSearchRoleMappingCustomResource
     Properties:
       FunctionName: !Sub '${StackPrefix}-${env}-create-opensearch-snapshot'
       Tags:
