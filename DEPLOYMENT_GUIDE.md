@@ -18,10 +18,48 @@ This guide helps you deploy the complete Video Search application using GitHub A
 
 Go to your **forked repository** → **Settings → Secrets and variables → Actions** and add:
 
+#### For Regular IAM Users:
 | Secret Name | Description | Example |
 |-------------|-------------|---------|
 | `AWS_ACCESS_KEY_ID` | AWS Access Key ID | `AKIAIOSFODNN7EXAMPLE` |
 | `AWS_SECRET_ACCESS_KEY` | AWS Secret Access Key | `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY` |
+
+#### For AWS SSO Users:
+| Secret Name | Description | Example |
+|-------------|-------------|---------|
+| `AWS_ACCESS_KEY_ID` | Temporary Access Key ID (starts with ASIA) | `ASIA5XF5XS.....` |
+| `AWS_SECRET_ACCESS_KEY` | Temporary Secret Access Key | `RiowxHzYnjwx6FH1BJ6ZdicYF....Z` |
+| `AWS_SESSION_TOKEN` | Session Token (long string) | `IQoJb3JpZ2luX2VjEKb//////////wEaC...` |
+
+#### Getting SSO Credentials:
+
+**Method 1: AWS CLI**
+```bash
+# Configure your SSO profile first (one time setup)
+aws configure sso --profile your-profile-name
+
+# Get temporary credentials
+aws configure export-credentials --profile your-profile-name --format env
+```
+
+**Method 2: AWS Console**
+1. Log into AWS Console via SSO
+2. Click your username (top right)
+3. Click "Command line or programmatic access"
+4. Copy the credentials from the "Option 2" section
+
+**Method 3: Manual Export**
+```bash
+# After SSO login
+export AWS_PROFILE=your-profile-name
+aws sts get-caller-identity  # Verify it works
+env | grep AWS_  # See all AWS environment variables
+```
+
+⚠️ **Important for SSO Users:**
+- Temporary credentials expire (usually 1-12 hours)
+- You'll need to update GitHub secrets when they expire
+- Consider using longer-duration credentials for deployment
 
 ### 4. AWS Permissions Required
 
@@ -177,6 +215,37 @@ To avoid ongoing AWS charges:
 - Wait 5-10 minutes for CloudFront propagation
 - Check browser console for errors
 - Verify the config.json file was uploaded
+
+#### 5. SSO Credential Issues
+
+**"The security token included in the request is invalid"**
+- Your SSO credentials have expired
+- Get new credentials and update GitHub secrets
+- SSO tokens typically last 1-12 hours
+
+**"Access Denied" with SSO**
+- Ensure your SSO role has the required permissions
+- Check if your organization has permission boundaries
+- Try using a different SSO role with broader permissions
+
+**"Unable to locate credentials"**
+- Make sure all three secrets are set: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`
+- Verify there are no extra spaces in the secret values
+- Check that the session token is the complete long string
+
+#### 6. Getting Fresh SSO Credentials
+
+If your deployment fails due to expired credentials:
+
+```bash
+# Re-authenticate with SSO
+aws sso login --profile your-profile-name
+
+# Get fresh credentials
+aws configure export-credentials --profile your-profile-name --format env
+
+# Copy the output and update your GitHub secrets
+```
 
 ### Getting Help
 

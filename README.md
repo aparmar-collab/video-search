@@ -20,8 +20,19 @@ Click the "Fork" button at the top of this page (GitHub web interface)
 
 ### 2. Set up AWS credentials
 In your forked repository, go to **Settings → Secrets and variables → Actions** and add:
+
+**For Regular IAM Users:**
 - `AWS_ACCESS_KEY_ID` - Your AWS access key
 - `AWS_SECRET_ACCESS_KEY` - Your AWS secret key
+
+**For AWS SSO Users:**
+- `AWS_ACCESS_KEY_ID` - Your temporary access key (starts with `ASIA`)
+- `AWS_SECRET_ACCESS_KEY` - Your temporary secret key  
+- `AWS_SESSION_TOKEN` - Your session token (long string)
+
+💡 **SSO Users**: Get these from `aws configure export-credentials --profile your-profile` or your AWS console
+
+📖 **[Detailed SSO Setup Guide](AWS_SSO_SETUP.md)** - Complete instructions for AWS SSO users
 
 ### 3. Deploy with one click
 1. Go to the **Actions** tab in your forked repository
